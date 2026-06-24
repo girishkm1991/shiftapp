@@ -394,123 +394,153 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               Active Trade Opportunities
             </h4>
 
-            {swaps.length === 0 ? (
-              <div className="text-center py-12 text-slate-400 font-semibold text-sm">
-                No shift trade postings found. Be the first to list!
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {swaps.map(s => {
-                  const isOwnRequest = s.requesterId === user.id;
-                  const hasVolunteered = s.volunteers?.some((v: any) => v.volunteerId === user.id);
-                  const selectedVol = s.volunteers?.find((v: any) => v.status === 'selected');
+            {(() => {
+              const visibleSwaps = swaps.filter(s => {
+                if (s.swapType === 'direct') {
+                  const isSupervisor = user.roleId === '2' || user.roleId === '3';
+                  return s.requesterId === user.id || s.targetUserId === user.id || isSupervisor;
+                }
+                return true;
+              });
 
-                  return (
-                    <div key={s.id} className="p-5 bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col justify-between">
-                      <div>
-                        {/* Status line */}
-                        <div className="flex justify-between items-center mb-3">
-                          <span className={`text-xxs font-black uppercase px-2.5 py-0.5 rounded ${getStatusBadgeClass(s.status)}`}>
-                            {s.status === 'volunteer_selected' ? 'Supervisor Pending' : s.status}
-                          </span>
-                          <span className="text-xs text-slate-400 font-bold">{s.date}</span>
-                        </div>
+              if (visibleSwaps.length === 0) {
+                return (
+                  <div className="text-center py-12 text-slate-400 font-semibold text-sm">
+                    No shift trade postings found. Be the first to list!
+                  </div>
+                );
+              }
 
-                        {/* Swap core detail */}
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {visibleSwaps.map(s => {
+                    const isOwnRequest = s.requesterId === user.id;
+                    const hasVolunteered = s.volunteers?.some((v: any) => v.volunteerId === user.id);
+                    const selectedVol = s.volunteers?.find((v: any) => v.status === 'selected');
+
+                    return (
+                      <div key={s.id} className="p-5 bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col justify-between">
                         <div>
-                          <p className="text-xxs text-slate-400 font-black uppercase">Original Employee</p>
-                          <h5 className="font-extrabold text-slate-900 text-base">{s.requesterName}</h5>
-                          <span className="text-xxs text-slate-400 font-semibold">Clock ID: {s.requesterClockId}</span>
-                          
-                          <div className="flex items-center space-x-2 mt-2">
-                            <span className="text-xs bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
-                              {s.shiftCode} Shift
+                          {/* Status line */}
+                          <div className="flex justify-between items-center mb-3">
+                            <span className={`text-xxs font-black uppercase px-2.5 py-0.5 rounded ${getStatusBadgeClass(s.status)}`}>
+                              {s.status === 'volunteer_selected' ? 'Supervisor Pending' : s.status}
                             </span>
-                            <span className="text-slate-400 font-bold text-xs">for</span>
-                            <span className="text-xs bg-slate-200 text-slate-700 font-extrabold px-2 py-0.5 rounded">
-                              OFF Day / Swap
-                            </span>
+                            <span className="text-xs text-slate-400 font-bold">{s.date}</span>
                           </div>
-                        </div>
 
-                        {/* Incentives */}
-                        {s.incentiveOffered && (
-                          <div className="mt-4 flex items-center space-x-1 text-emerald-800 bg-emerald-100/50 p-2 rounded-xl text-xs font-black">
-                            <DollarSign className="h-4 w-4" />
-                            <span>Incentive Cash: ₹{s.incentiveAmount}</span>
-                          </div>
-                        )}
+                          {/* Direct Swap Target Coverage Banner */}
+                          {s.swapType === 'direct' && s.targetUserId === user.id && (
+                            <div className="mb-4 bg-orange-50 border border-orange-200/50 p-3.5 rounded-xl text-xs font-black text-orange-900 leading-relaxed">
+                              {s.requesterName} is requesting coverage for {s.shiftCode} Shift on {s.date}.
+                            </div>
+                          )}
 
-                        {s.remarks && (
-                          <div className="mt-3 text-xs italic text-slate-500 font-semibold border-l-2 border-orange-500 pl-2">
-                            "{s.remarks}"
-                          </div>
-                        )}
+                          {/* Swap core detail */}
+                          <div>
+                            <p className="text-xxs text-slate-400 font-black uppercase">Original Employee</p>
+                            <h5 className="font-extrabold text-slate-900 text-base">{s.requesterName}</h5>
+                            <span className="text-xxs text-slate-400 font-semibold">Clock ID: {s.requesterClockId}</span>
 
-                        {/* Volunteer statistics */}
-                        {s.volunteers && s.volunteers.length > 0 && (
-                          <div className="mt-4 bg-white/70 p-3 rounded-xl border border-slate-200/60">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wide">Volunteers ({s.volunteers.length})</p>
-                            <div className="space-y-2 mt-2">
-                              {s.volunteers.map((v: any) => (
-                                <div key={v.id} className="flex justify-between items-center text-xs">
-                                  <span className="font-bold text-slate-700">{v.volunteerName}</span>
-                                  {isOwnRequest && s.status === 'pending' && (
-                                    <button
-                                      onClick={() => handleSelectVolunteer(s.id, v.volunteerId)}
-                                      className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold px-2.5 py-1 rounded-lg text-xxs transition shadow-sm"
-                                    >
-                                      Select
-                                    </button>
-                                  )}
-                                  {v.status === 'selected' && (
-                                    <span className="text-xxs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">Selected</span>
-                                  )}
-                                </div>
-                              ))}
+                            {s.requesterSectionName && (
+                              <div className="text-xxs text-slate-500 font-bold mt-1">
+                                Section: <span className="text-slate-800">{s.requesterSectionName}</span>
+                                {s.requesterMachineName && (
+                                  <> | Machine: <span className="text-slate-800">{s.requesterMachineName}</span></>
+                                )}
+                              </div>
+                            )}
+                            
+                            <div className="flex items-center space-x-2 mt-2">
+                              <span className="text-xs bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
+                                {s.shiftCode} Shift
+                              </span>
+                              <span className="text-slate-400 font-bold text-xs">for</span>
+                              <span className="text-xs bg-slate-200 text-slate-700 font-extrabold px-2 py-0.5 rounded">
+                                OFF Day / Swap
+                              </span>
                             </div>
                           </div>
-                        )}
-                      </div>
 
-                      {/* Action Triggers */}
-                      <div className="mt-6 border-t border-slate-200/60 pt-4">
-                        {isOwnRequest ? (
-                          s.status === 'pending' || s.status === 'volunteer_selected' ? (
-                            <button
-                              onClick={() => handleCancelSwap(s.id)}
-                              className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs py-2.5 rounded-xl transition"
-                            >
-                              Cancel Posting
-                            </button>
-                          ) : (
-                            <span className="text-xs text-slate-400 font-semibold block text-center">Trade Completed</span>
-                          )
-                        ) : (
-                          s.status === 'pending' && (
-                            hasVolunteered ? (
+                          {/* Incentives */}
+                          {s.incentiveOffered && (
+                            <div className="mt-4 flex items-center space-x-1 text-emerald-800 bg-emerald-100/50 p-2 rounded-xl text-xs font-black">
+                              <DollarSign className="h-4 w-4" />
+                              <span>Incentive Cash: ₹{s.incentiveAmount}</span>
+                            </div>
+                          )}
+
+                          {s.remarks && (
+                            <div className="mt-3 text-xs italic text-slate-500 font-semibold border-l-2 border-orange-500 pl-2">
+                              "{s.remarks}"
+                            </div>
+                          )}
+
+                          {/* Volunteer statistics */}
+                          {s.volunteers && s.volunteers.length > 0 && (
+                            <div className="mt-4 bg-white/70 p-3 rounded-xl border border-slate-200/60">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wide">Volunteers ({s.volunteers.length})</p>
+                              <div className="space-y-2 mt-2">
+                                {s.volunteers.map((v: any) => (
+                                  <div key={v.id} className="flex justify-between items-center text-xs">
+                                    <span className="font-bold text-slate-700">{v.volunteerName}</span>
+                                    {isOwnRequest && s.status === 'pending' && (
+                                      <button
+                                        onClick={() => handleSelectVolunteer(s.id, v.volunteerId)}
+                                        className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold px-2.5 py-1 rounded-lg text-xxs transition shadow-sm"
+                                      >
+                                        Select
+                                      </button>
+                                    )}
+                                    {v.status === 'selected' && (
+                                      <span className="text-xxs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">Selected</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action Triggers */}
+                        <div className="mt-6 border-t border-slate-200/60 pt-4">
+                          {isOwnRequest ? (
+                            s.status === 'pending' || s.status === 'volunteer_selected' ? (
                               <button
-                                disabled
-                                className="w-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs py-2.5 rounded-xl cursor-not-allowed"
+                                onClick={() => handleCancelSwap(s.id)}
+                                className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs py-2.5 rounded-xl transition"
                               >
-                                Volunteered ✓
+                                Cancel Posting
                               </button>
                             ) : (
-                              <button
-                                onClick={() => handleVolunteer(s.id)}
-                                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs py-3 rounded-xl transition active:scale-95"
-                              >
-                                Volunteer for Shift
-                              </button>
+                              <span className="text-xs text-slate-400 font-semibold block text-center">Trade Completed</span>
                             )
-                          )
-                        )}
+                          ) : (
+                            s.status === 'pending' && (
+                              hasVolunteered ? (
+                                <button
+                                  disabled
+                                  className="w-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs py-2.5 rounded-xl cursor-not-allowed"
+                                >
+                                  Accepted ✓
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleVolunteer(s.id)}
+                                  className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs py-3 rounded-xl transition active:scale-95"
+                                >
+                                  {s.swapType === 'direct' ? 'Accept Direct Swap' : 'Volunteer for Shift'}
+                                </button>
+                              )
+                            )
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -617,39 +647,45 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               )}
 
               {/* Intelligent Eligibility Recommendation Panel */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                <span className="text-xxs font-black text-orange-600 uppercase flex items-center">
-                  <Award className="mr-1 h-3.5 w-3.5" />
-                  Intelligent Matching Recommendations
-                </span>
-                {(fetchingShift || formShiftCode === '') ? (
-                  <p className="text-xs text-slate-400 mt-2 font-bold flex items-center">
-                    <RefreshCw className="animate-spin mr-1.5 h-3.5 w-3.5 text-orange-600" />
-                    Resolving employee schedule...
-                  </p>
-                ) : fetchingRecs ? (
-                  <p className="text-xs text-slate-400 mt-2 font-bold flex items-center">
-                    <RefreshCw className="animate-spin mr-1.5 h-3.5 w-3.5 text-orange-600" />
-                    Scanning certified builders...
-                  </p>
-                ) : recommendations.length === 0 ? (
-                  <p className="text-xs text-slate-400 mt-2 font-bold">No eligible matching employees available. Ensure shift dates are correct.</p>
-                ) : (
-                  <div className="mt-2 space-y-2 max-h-32 overflow-y-auto">
-                    {recommendations.slice(0, 3).map(rec => (
-                      <div key={rec.userId} className="flex justify-between items-center text-xs border-b border-slate-200 pb-1.5 last:border-none last:pb-0">
-                        <div>
-                          <span className="font-bold text-slate-700">{rec.name}</span>
-                          <span className="text-[10px] text-slate-400 font-semibold ml-1.5">Score: {rec.score}%</span>
+              {formSwapType === 'open' ? (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <span className="text-xxs font-black text-orange-600 uppercase flex items-center">
+                    <Award className="mr-1 h-3.5 w-3.5" />
+                    Intelligent Matching Recommendations
+                  </span>
+                  {(fetchingShift || formShiftCode === '') ? (
+                    <p className="text-xs text-slate-400 mt-2 font-bold flex items-center">
+                      <RefreshCw className="animate-spin mr-1.5 h-3.5 w-3.5 text-orange-600" />
+                      Resolving employee schedule...
+                    </p>
+                  ) : fetchingRecs ? (
+                    <p className="text-xs text-slate-400 mt-2 font-bold flex items-center">
+                      <RefreshCw className="animate-spin mr-1.5 h-3.5 w-3.5 text-orange-600" />
+                      Scanning certified builders...
+                    </p>
+                  ) : recommendations.length === 0 ? (
+                    <p className="text-xs text-slate-400 mt-2 font-bold">No eligible matching employees available. Ensure shift dates are correct.</p>
+                  ) : (
+                    <div className="mt-2 space-y-2 max-h-32 overflow-y-auto">
+                      {recommendations.slice(0, 3).map(rec => (
+                        <div key={rec.userId} className="flex justify-between items-center text-xs border-b border-slate-200 pb-1.5 last:border-none last:pb-0">
+                          <div>
+                            <span className="font-bold text-slate-700">{rec.name}</span>
+                            <span className="text-[10px] text-slate-400 font-semibold ml-1.5">Score: {rec.score}%</span>
+                          </div>
+                          <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded font-bold">
+                            {rec.notes.slice(0, 1).join('') || 'Eligible'}
+                          </span>
                         </div>
-                        <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded font-bold">
-                          {rec.notes.slice(0, 1).join('') || 'Eligible'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 text-slate-500 text-xs font-semibold italic">
+                  Intelligent recommendation filtering is bypassed for Direct Swap requests (Pilot Mode).
+                </div>
+              )}
 
               {/* Incentives */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">

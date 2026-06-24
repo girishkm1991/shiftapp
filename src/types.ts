@@ -88,6 +88,7 @@ export interface SwapRequest {
   requesterId: string;
   date: string; // YYYY-MM-DD
   shiftCode: 'A' | 'B' | 'C' | 'OFF';
+  requestedShiftCode?: 'A' | 'B' | 'C' | 'OFF';
   swapType: 'direct' | 'open';
   targetUserId?: string; // For direct swaps
   status: 'pending' | 'volunteer_selected' | 'approved' | 'rejected' | 'cancelled';

@@ -10,6 +10,10 @@ import { ScheduleResolutionService } from '../services/ScheduleResolutionService
 
 export const apiRouter = Router();
 
+const CONFIG = {
+  IS_PILOT_MODE: process.env.SWAP_PILOT_MODE !== 'false'
+};
+
 // Helper to generate IDs
 const uuid = () => Math.random().toString(36).substring(2, 11);
 
@@ -294,7 +298,7 @@ apiRouter.post('/auth/onboard/step3', requireAuth, (req: Request, res: Response)
 // --- MODULE 2: ELIGIBILITY & RECOMMENDATION ENGINE ---
 
 // Helper logic to run Intelligent Eligibility Checks
-function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' | 'C' | 'OFF'): { eligible: boolean; reasons: string[] } {
+function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' | 'C' | 'OFF', swapId?: string): { eligible: boolean; reasons: string[] } {
   const reasons: string[] = [];
   const users = dbInstance.getUsers();
   const leaves = dbInstance.getLeaveRequests();
@@ -303,6 +307,39 @@ function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' 
 
   if (!targetUser) {
     return { eligible: false, reasons: ['Employee not found'] };
+  }
+
+  // Handle direct swap pilot bypass
+  if (swapId && CONFIG.IS_PILOT_MODE) {
+    const swap = dbInstance.getSwapRequests().find(s => s.id === swapId);
+    if (swap && swap.swapType === 'direct' && swap.targetUserId === userId) {
+      if (targetUser.status !== 'active') {
+        return { eligible: false, reasons: ['Employee profile onboarding is incomplete'] };
+      }
+      if (swap.requesterId === userId) {
+        return { eligible: false, reasons: ['You cannot swap with yourself'] };
+      }
+      if (swap.status !== 'pending') {
+        return { eligible: false, reasons: ['Swap is already approved or closed'] };
+      }
+      const hasApprovedSwap = dbInstance.getSwapRequests().some(s => 
+        s.date === date && 
+        s.status === 'approved' && 
+        (s.requesterId === userId || s.targetUserId === userId)
+      );
+      if (hasApprovedSwap) {
+        return { eligible: false, reasons: ['Already has an approved swap on this date'] };
+      }
+
+      console.log({
+        module: 'Direct Swap',
+        requesterId: swap.requesterId,
+        targetUserId: userId,
+        shiftCode: reqShiftCode,
+        eligibility: 'AUTO_APPROVED_FOR_PILOT'
+      });
+      return { eligible: true, reasons: [] };
+    }
   }
 
   // 1. Employee status check
@@ -382,6 +419,30 @@ apiRouter.get('/swaps/check-eligibility', requireAuth, (req: Request, res: Respo
   res.json(result);
 });
 
+// Get employees scheduled for a specific shift on a specific date for direct swap targeting
+apiRouter.get('/swaps/eligible-employees', requireAuth, (req: Request, res: Response) => {
+  const { date, requestedShiftCode } = req.query;
+  if (!date || !requestedShiftCode) {
+    return res.status(400).json({ error: 'date and requestedShiftCode are required' });
+  }
+
+  const users = dbInstance.getUsers().filter(u => u.id !== req.user!.id && u.roleId === '1' && u.status === 'active');
+  
+  const eligibleUsers = users.filter(user => {
+    const { shiftCode } = ScheduleResolutionService.resolveEmployeeShift(user.id, date as string);
+    return shiftCode === requestedShiftCode;
+  });
+
+  res.json(eligibleUsers.map(u => ({
+    id: u.id,
+    name: u.name,
+    clockId: u.clockId,
+    roleId: u.roleId,
+    sectionId: u.sectionId,
+    machineId: u.machineId
+  })));
+});
+
 // Recommendations Endpoint
 apiRouter.get('/swaps/recommendations', requireAuth, (req: Request, res: Response) => {
   const { date, shiftCode } = req.query;
@@ -439,9 +500,13 @@ apiRouter.get('/swaps', requireAuth, (req: Request, res: Response) => {
   const swaps = dbInstance.getSwapRequests();
   const users = dbInstance.getUsers();
   const volunteers = dbInstance.getSwapVolunteers();
+  const sections = dbInstance.getSections();
+  const machines = dbInstance.getMachines();
 
   const richSwaps = swaps.map(s => {
     const requester = users.find(u => u.id === s.requesterId);
+    const requesterSection = requester ? sections.find(sec => sec.id === requester.sectionId) : null;
+    const requesterMachine = requester ? machines.find(m => m.id === requester.machineId) : null;
     const target = s.targetUserId ? users.find(u => u.id === s.targetUserId) : null;
     const requestVolunteers = volunteers.filter(v => v.swapRequestId === s.id).map(v => {
       const volUser = users.find(u => u.id === v.volunteerId);
@@ -459,6 +524,8 @@ apiRouter.get('/swaps', requireAuth, (req: Request, res: Response) => {
       ...s,
       requesterName: requester?.name,
       requesterClockId: requester?.clockId,
+      requesterSectionName: requesterSection?.name,
+      requesterMachineName: requesterMachine?.name,
       targetName: target?.name,
       targetClockId: target?.clockId,
       volunteers: requestVolunteers
@@ -470,10 +537,14 @@ apiRouter.get('/swaps', requireAuth, (req: Request, res: Response) => {
 
 // Create a Swap Request
 apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
-  const { date, shiftCode, swapType, targetUserId, remarks, incentiveOffered, incentiveAmount } = req.body;
+  const { date, shiftCode, swapType, targetUserId, remarks, incentiveOffered, incentiveAmount, requestedShiftCode } = req.body;
   
-  if (!date || !shiftCode || !swapType) {
-    return res.status(400).json({ error: 'date, shiftCode and swapType are required' });
+  if (!date || !shiftCode || !swapType || !requestedShiftCode) {
+    return res.status(400).json({ error: 'date, shiftCode, swapType and requestedShiftCode are required' });
+  }
+
+  if (requestedShiftCode === shiftCode) {
+    return res.status(400).json({ error: 'You cannot request the same shift you currently have.' });
   }
 
   const requesterId = req.user!.id;
@@ -513,6 +584,7 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
     requesterId,
     date,
     shiftCode,
+    requestedShiftCode,
     swapType,
     targetUserId: swapType === 'direct' ? targetUserId : undefined,
     status: 'pending',
@@ -597,15 +669,47 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response
   if (!swap) {
     return res.status(404).json({ error: 'Swap request not found' });
   }
+
+  // 1. Employee is the requester
   if (swap.requesterId === volunteerId) {
-    return res.status(400).json({ error: 'You cannot volunteer for your own request' });
+    return res.status(400).json({ error: 'You cannot volunteer/accept your own request' });
   }
+
+  // 2. The swap has already been approved or closed
   if (swap.status !== 'pending') {
-    return res.status(400).json({ error: 'Swap request is no longer accepting volunteers' });
+    return res.status(400).json({ error: 'Swap request is no longer accepting volunteers (already approved or closed)' });
+  }
+
+  const targetUser = dbInstance.getUsers().find(u => u.id === volunteerId);
+  if (!targetUser) {
+    return res.status(404).json({ error: 'Employee not found' });
+  }
+
+  // 3. Employee is inactive
+  if (targetUser.status !== 'active') {
+    return res.status(400).json({ error: 'Your employee profile onboarding is incomplete or inactive' });
+  }
+
+  // 4. Employee already has an approved swap on that date
+  const hasApprovedSwap = swaps.some(s => 
+    s.date === swap.date && 
+    s.status === 'approved' && 
+    (s.requesterId === volunteerId || s.targetUserId === volunteerId)
+  );
+  if (hasApprovedSwap) {
+    return res.status(400).json({ error: 'You already have an approved swap on this date' });
+  }
+
+  // 5. Swap shift validation (volunteer must have requested shift code)
+  const { shiftCode: volunteerCurrentShift } = ScheduleResolutionService.resolveEmployeeShift(volunteerId, swap.date);
+  if (swap.requestedShiftCode && swap.requestedShiftCode !== volunteerCurrentShift) {
+    return res.status(400).json({
+      error: `Swap mismatch: This request requires a coverage partner with a ${swap.requestedShiftCode} shift. Your current shift is ${volunteerCurrentShift || 'OFF'}.`
+    });
   }
 
   // Run eligibility checks
-  const eligibility = checkEligibility(volunteerId, swap.date, swap.shiftCode);
+  const eligibility = checkEligibility(volunteerId, swap.date, swap.shiftCode, swapId);
   if (!eligibility.eligible) {
     return res.status(400).json({ error: 'You are not eligible for this shift. ' + eligibility.reasons.join(' ') });
   }
@@ -615,47 +719,95 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response
     id: volId,
     swapRequestId: swapId,
     volunteerId,
-    status: 'pending',
+    status: swap.swapType === 'direct' ? 'selected' : 'pending',
     createdAt: new Date().toISOString()
   };
 
   dbInstance.updateState(state => {
     state.swapVolunteers.push(newVol);
 
-    // Add volunteer to the swap conversation
-    const conv = state.conversations.find(c => c.swapRequestId === swapId);
-    if (conv) {
-      const alreadyPart = state.conversationParticipants.some(p => p.conversationId === conv.id && p.userId === volunteerId);
-      if (!alreadyPart) {
-        state.conversationParticipants.push({
-          id: uuid(),
-          conversationId: conv.id,
-          userId: volunteerId
-        });
-      }
-      state.messages.push({
+    const s = state.swapRequests.find(sr => sr.id === swapId);
+    if (s && s.swapType === 'direct') {
+      s.status = 'volunteer_selected';
+      s.targetUserId = volunteerId;
+      s.updatedAt = new Date().toISOString();
+    }
+
+    const requester = state.users.find(u => u.id === swap.requesterId);
+
+    // Add volunteer to the swap conversation or make sure it exists
+    let conv = state.conversations.find(c => c.swapRequestId === swapId);
+    if (!conv) {
+      const convId = 'c_swap_' + uuid();
+      conv = {
+        id: convId,
+        type: 'swap',
+        title: `Swap Discussion: ${requester?.name || 'Employee'} (${swap.date})`,
+        swapRequestId: swapId,
+        createdAt: new Date().toISOString()
+      };
+      state.conversations.push(conv);
+    }
+
+    const reqPart = state.conversationParticipants.some(p => p.conversationId === conv!.id && p.userId === swap.requesterId);
+    if (!reqPart) {
+      state.conversationParticipants.push({
         id: uuid(),
         conversationId: conv.id,
-        senderId: volunteerId,
-        text: `I have volunteered to cover your shift! Let's discuss.`,
-        isReadBy: [volunteerId],
-        createdAt: new Date().toISOString()
+        userId: swap.requesterId
       });
     }
 
+    const volPart = state.conversationParticipants.some(p => p.conversationId === conv!.id && p.userId === volunteerId);
+    if (!volPart) {
+      state.conversationParticipants.push({
+        id: uuid(),
+        conversationId: conv.id,
+        userId: volunteerId
+      });
+    }
+
+    state.messages.push({
+      id: uuid(),
+      conversationId: conv.id,
+      senderId: volunteerId,
+      text: swap.swapType === 'direct' ? `I have accepted your direct swap request! Let's discuss.` : `I have volunteered to cover your shift! Let's discuss.`,
+      isReadBy: [volunteerId],
+      createdAt: new Date().toISOString()
+    });
+
     // Notify requester
-    getNotificationService().sendNotification(
-      swap.requesterId,
-      'New Swap Volunteer',
-      `${req.user!.name} volunteered for your shift swap request on ${swap.date}.`,
-      'swap',
-      '/swap-marketplace'
-    ).catch(e => console.error(e));
+    if (swap.swapType === 'direct') {
+      getNotificationService().sendNotification(
+        swap.requesterId,
+        'Direct Swap Accepted!',
+        `${req.user!.name} accepted your direct shift swap request for ${swap.date}. Pending Supervisor approval.`,
+        'swap',
+        '/swap-marketplace'
+      ).catch(e => console.error(e));
+
+      // Notify Supervisor Sarah Connor
+      getNotificationService().sendNotification(
+        'sup1', // Supervisor Connor
+        'Swap Approval Pending',
+        `${requester?.name || 'Employee'} and ${req.user!.name} request a direct shift swap on ${swap.date}.`,
+        'swap',
+        '/supervisor/approvals'
+      ).catch(e => console.error(e));
+    } else {
+      getNotificationService().sendNotification(
+        swap.requesterId,
+        'New Swap Volunteer',
+        `${req.user!.name} volunteered for your shift swap request on ${swap.date}.`,
+        'swap',
+        '/swap-marketplace'
+      ).catch(e => console.error(e));
+    }
 
     state.auditLogs.push({
       id: uuid(),
       userId: volunteerId,
-      action: 'VOLUNTEER_FOR_SWAP',
+      action: swap.swapType === 'direct' ? 'ACCEPT_DIRECT_SWAP' : 'VOLUNTEER_FOR_SWAP',
       timestamp: new Date().toISOString(),
       newValue: `swapId: ${swapId}`
     });
@@ -750,31 +902,31 @@ apiRouter.post('/swaps/:id/approve', requireAuth, (req: Request, res: Response) 
       const reqAssign = state.shiftAssignments.find(a => a.userId === swap.requesterId && a.date === swap.date);
       const volAssign = state.shiftAssignments.find(a => a.userId === volunteer.id && a.date === swap.date);
 
-      const tempCode = reqAssign ? reqAssign.shiftCode : 'OFF';
-      const volCode = volAssign ? volAssign.shiftCode : 'OFF';
+      const targetReqShift = swap.requestedShiftCode || 'OFF';
+      const targetVolShift = swap.shiftCode;
 
-      // Update requester assignment with volunteer's shift (which is normally OFF)
+      // Update requester assignment with OFF
       if (reqAssign) {
-        reqAssign.shiftCode = volCode;
+        reqAssign.shiftCode = targetReqShift;
       } else {
         state.shiftAssignments.push({
           id: `sa_${swap.requesterId}_${swap.date}`,
           userId: swap.requesterId,
           date: swap.date,
-          shiftCode: volCode,
+          shiftCode: targetReqShift,
           machineId: requester?.machineId
         });
       }
 
-      // Update volunteer assignment with requester's shift
+      // Update volunteer assignment with requested shift
       if (volAssign) {
-        volAssign.shiftCode = tempCode;
+        volAssign.shiftCode = targetVolShift;
       } else {
         state.shiftAssignments.push({
           id: `sa_${volunteer.id}_${swap.date}`,
           userId: volunteer.id,
           date: swap.date,
-          shiftCode: tempCode,
+          shiftCode: targetVolShift,
           machineId: volunteer?.machineId
         });
       }
