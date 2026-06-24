@@ -4,16 +4,16 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Copy dependency files
-COPY package.json ./
+# Copy dependency files first for layer caching
+COPY package*.json ./
 
-# Install all dependencies (including devDependencies for esbuild/typescript compiling)
-RUN npm install
+# Install all dependencies (including devDependencies like esbuild/typescript/vite for compilation)
+RUN npm ci
 
-# Copy application files
+# Copy the rest of the application source code
 COPY . .
 
-# Run production compilation: builds Vite assets and bundles Express server.ts
+# Compile frontend assets and bundle Express backend
 RUN npm run build
 
 # Stage 2: Runtime Phase
@@ -21,16 +21,20 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Copy package descriptors and built assets
-COPY --from=builder /app/package.json ./
+# Copy package descriptors for installing production dependencies
+COPY --from=builder /app/package*.json ./
+
+# Install only production dependencies
+RUN npm ci --omit=dev
+
+# Copy only the compiled/built distribution assets from the build stage
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/data ./data
 
-# Install ONLY production dependencies to keep the image slim
-RUN npm install --only=production
+# Create empty runtime directories for local persistence, uploads, and logs as required
+RUN mkdir -p uploads logs data
 
-# Expose mandatory Cloud Run port
+# Expose the mandatory app port (3000)
 EXPOSE 3000
 
-# Start command
+# Start the bundled Express server
 CMD ["npm", "start"]

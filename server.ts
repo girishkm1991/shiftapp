@@ -19,6 +19,11 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // Simple health check endpoint for container health probes
+  app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+  });
+
   // API router goes FIRST
   app.use('/api', apiRouter);
 
