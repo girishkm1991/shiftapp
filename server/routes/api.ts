@@ -291,12 +291,6 @@ apiRouter.post('/auth/onboard/step3', requireAuth, (req: Request, res: Response)
 });
 
 
-// Helper to get employee shift code for a date based on explicit overrides or weekly pattern
-function getEmployeeShiftForDate(userId: string, dateStr: string): 'A' | 'B' | 'C' | 'OFF' {
-  return ScheduleResolutionService.resolveEmployeeShift(userId, dateStr).shiftCode;
-}
-
-
 // --- MODULE 2: ELIGIBILITY & RECOMMENDATION ENGINE ---
 
 // Helper logic to run Intelligent Eligibility Checks
@@ -317,7 +311,8 @@ function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' 
   }
 
   // 2. Is target user already working on this exact date?
-  const existingAssignCode = getEmployeeShiftForDate(userId, date);
+  const { shiftCode: existingAssignCode, source: existingSource } = ScheduleResolutionService.resolveEmployeeShift(userId, date);
+  ScheduleResolutionService.logResolution('Eligibility Validation', userId, date, existingAssignCode, existingSource);
   if (existingAssignCode && existingAssignCode !== 'OFF') {
     reasons.push(`Already working ${existingAssignCode} Shift on this day.`);
   }
@@ -358,7 +353,8 @@ function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' 
     const dStr = String(currentDayDate.getDate()).padStart(2, '0');
     const curDateStr = `${y}-${m}-${dStr}`;
     
-    const curShift = getEmployeeShiftForDate(userId, curDateStr);
+    const { shiftCode: curShift, source: curSource } = ScheduleResolutionService.resolveEmployeeShift(userId, curDateStr);
+    ScheduleResolutionService.logResolution('Weekly Overtime Matching Check', userId, curDateStr, curShift, curSource);
     if (curShift && curShift !== 'OFF') {
       weekAssignCount++;
     }
@@ -482,10 +478,33 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
 
   const requesterId = req.user!.id;
   
-  // Verify requester actually has this assignment
-  const currentAssignCode = getEmployeeShiftForDate(requesterId, date);
-  if (!currentAssignCode || currentAssignCode !== shiftCode) {
-    return res.status(400).json({ error: `You are not scheduled for ${shiftCode} Shift on ${date}. Current: ${currentAssignCode || 'None'}` });
+  // Verify requester actually has this assignment using the centralized resolution service
+  const {
+    shiftCode: currentAssignCode,
+    source
+  } = ScheduleResolutionService.resolveEmployeeShift(
+    requesterId,
+    date
+  );
+
+  ScheduleResolutionService.logResolution(
+    'Swap Creation',
+    requesterId,
+    date,
+    currentAssignCode,
+    source
+  );
+
+  if (!currentAssignCode || currentAssignCode === 'OFF') {
+    return res.status(400).json({
+      error: `You are OFF on ${date}.`
+    });
+  }
+
+  if (currentAssignCode !== shiftCode) {
+    return res.status(400).json({
+      error: `You are not scheduled for ${shiftCode} Shift on ${date}. Current: ${currentAssignCode}`
+    });
   }
 
   const newSwapId = 'swap_' + uuid();
@@ -1248,7 +1267,8 @@ apiRouter.get('/supervisor/dashboard', requireAuth, (req: Request, res: Response
 
   // Team availability today
   const teamStatusToday = teamUsers.map(user => {
-    const assignCode = getEmployeeShiftForDate(user.id, todayStr) || 'OFF';
+    const { shiftCode: assignCode, source: assignSource } = ScheduleResolutionService.resolveEmployeeShift(user.id, todayStr);
+    ScheduleResolutionService.logResolution('Supervisor Dashboard Team Status', user.id, todayStr, assignCode, assignSource);
     const leave = leaves.find(l => l.userId === user.id && l.status === 'approved' && todayStr >= l.startDate && todayStr <= l.endDate);
 
     return {
