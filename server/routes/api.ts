@@ -39,6 +39,75 @@ declare global {
 
 // --- MODULE 1: AUTHENTICATION ---
 
+// Public endpoint to fetch registration settings, departments and sections
+apiRouter.get('/auth/config', (req: Request, res: Response) => {
+  const allowSelfRegistration = process.env.ALLOW_SELF_REGISTRATION !== 'false';
+  res.json({
+    allowSelfRegistration,
+    departments: dbInstance.getDepartments(),
+    sections: dbInstance.getSections()
+  });
+});
+
+// Self-registration endpoint
+apiRouter.post('/auth/register', (req: Request, res: Response) => {
+  const allowSelfRegistration = process.env.ALLOW_SELF_REGISTRATION !== 'false';
+  if (!allowSelfRegistration) {
+    return res.status(403).json({ error: 'Self-registration is currently disabled.' });
+  }
+
+  const { clockId, name, mobile, departmentId, sectionId, accessCode } = req.body;
+
+  if (!clockId || !name || !mobile || !departmentId || !sectionId || !accessCode) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  // Validate Temporary Factory Access Code
+  const expectedCode = process.env.FACTORY_ACCESS_CODE || 'APOLLO2026';
+  if (accessCode.trim() !== expectedCode.trim()) {
+    return res.status(400).json({ error: 'Invalid Temporary Factory Access Code.' });
+  }
+
+  // Check if Clock ID already exists
+  const existingUser = dbInstance.getUsers().find(u => u.clockId.toUpperCase() === clockId.toUpperCase().trim());
+  if (existingUser) {
+    return res.status(400).json({ error: `Clock ID ${clockId.toUpperCase().trim()} is already registered.` });
+  }
+
+  const newUserId = 'u_' + uuid();
+  const newUser: User = {
+    id: newUserId,
+    clockId: clockId.toUpperCase().trim(),
+    name: name.trim(),
+    mobile: mobile.trim(),
+    departmentId,
+    sectionId,
+    roleId: '1', // Default Employee role
+    status: 'onboarding_step1', // Force onboarding: password setup -> profile completion -> shift pattern setup
+    passwordHash: 'sha256_password123_placeholder', // default temp password hash
+    createdAt: new Date().toISOString()
+  };
+
+  // Persist user and create log
+  dbInstance.updateState(state => {
+    state.users.push(newUser);
+    state.auditLogs.push({
+      id: uuid(),
+      userId: newUserId,
+      action: 'USER_SELF_REGISTER',
+      timestamp: new Date().toISOString(),
+      newValue: `Clock ID: ${newUser.clockId}`
+    });
+  });
+
+  console.log(`[Auth] Employee ${newUser.name} (${newUser.clockId}) self-registered successfully.`);
+
+  res.status(201).json({
+    success: true,
+    message: 'Self-registration completed. Please sign in with your temporary password: password123'
+  });
+});
+
 apiRouter.post('/auth/login', (req: Request, res: Response) => {
   const { clockId, password, rememberMe } = req.body;
   

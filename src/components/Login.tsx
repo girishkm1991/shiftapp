@@ -43,6 +43,18 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     'OFF', 'A', 'A', 'A', 'A', 'A', 'OFF' // Default: Sat-Sun Off, Mon-Fri Morning
   ]);
 
+  // Self-registration states
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [regClockId, setRegClockId] = useState('');
+  const [regName, setRegName] = useState('');
+  const [regMobile, setRegMobile] = useState('');
+  const [regDept, setRegDept] = useState('');
+  const [regSect, setRegSect] = useState('');
+  const [regAccessCode, setRegAccessCode] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [allowSelfReg, setAllowSelfReg] = useState(false);
+  const [regAssets, setRegAssets] = useState<{ departments: Department[]; sections: Section[] }>({ departments: [], sections: [] });
+
   useEffect(() => {
     // If there is a cached token, we can check it
     const savedToken = localStorage.getItem('imvelo_token');
@@ -64,7 +76,50 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         localStorage.clear();
       }
     }
+
+    // Fetch public self-registration configuration
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch('/api/auth/config');
+        const data = await res.json();
+        if (data) {
+          setAllowSelfReg(data.allowSelfRegistration);
+          setRegAssets({
+            departments: data.departments || [],
+            sections: data.sections || []
+          });
+          if (data.departments && data.departments.length > 0) {
+            setRegDept(data.departments[0].id);
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching registration settings:', e);
+      }
+    };
+    fetchConfig();
   }, []);
+
+  // Update section dropdown when selected department changes
+  useEffect(() => {
+    if (regDept && regAssets.sections.length > 0) {
+      const filtered = regAssets.sections.filter(s => s.departmentId === regDept);
+      if (filtered.length > 0) {
+        setRegSect(filtered[0].id);
+      } else {
+        setRegSect('');
+      }
+    }
+  }, [regDept, regAssets.sections]);
+
+  // Pre-fill onboarding profile details when tempUser updates
+  useEffect(() => {
+    if (tempUser) {
+      if (tempUser.mobile) setMobile(tempUser.mobile);
+      if (tempUser.email) setEmail(tempUser.email);
+      if (tempUser.departmentId) setDept(tempUser.departmentId);
+      if (tempUser.sectionId) setSect(tempUser.sectionId);
+    }
+  }, [tempUser]);
 
   // Fetch asset metadata for onboarding dropdowns
   const fetchAssets = async (authToken: string) => {
@@ -118,6 +173,60 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       }
     } catch (err: any) {
       setError(err.message || 'Connection error. Try password123');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleRegister = () => {
+    setIsRegistering(!isRegistering);
+    setError('');
+    setSuccessMessage('');
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regClockId.trim() || !regName.trim() || !regMobile.trim() || !regDept || !regSect || !regAccessCode.trim()) {
+      setError('Please fill in all registration fields.');
+      return;
+    }
+
+    setError('');
+    setSuccessMessage('');
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clockId: regClockId,
+          name: regName,
+          mobile: regMobile,
+          departmentId: regDept,
+          sectionId: regSect,
+          accessCode: regAccessCode
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Registration failed.');
+      }
+
+      setSuccessMessage(data.message || 'Self-registration completed. Please sign in with default password: password123');
+      setIsRegistering(false);
+      
+      // Prefill Clock ID on login screen
+      setClockId(regClockId.toUpperCase().trim());
+      setPassword('');
+
+      // Clear register fields
+      setRegClockId('');
+      setRegName('');
+      setRegMobile('');
+      setRegAccessCode('');
+    } catch (err: any) {
+      setError(err.message || 'Registration failed.');
     } finally {
       setLoading(false);
     }
@@ -249,67 +358,202 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               </div>
             )}
 
-            <form className="space-y-6" onSubmit={handleLogin}>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700">
-                  Clock ID (e.g., EMP001, SUP901)
-                </label>
-                <div className="mt-1 relative rounded-md shadow-sm">
+            {successMessage && (
+              <div className="mb-4 bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg text-sm text-emerald-800 font-medium">
+                {successMessage}
+              </div>
+            )}
+
+            {!isRegistering ? (
+              <>
+                <form className="space-y-6" onSubmit={handleLogin}>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Clock ID (e.g., EMP001, SUP901)
+                    </label>
+                    <div className="mt-1 relative rounded-md shadow-sm">
+                      <input
+                        type="text"
+                        required
+                        value={clockId}
+                        onChange={(e) => setClockId(e.target.value)}
+                        className="block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 font-medium transition duration-150"
+                        placeholder="EMP001"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Password
+                    </label>
+                    <div className="mt-1 relative rounded-md shadow-sm">
+                      <input
+                        type="password"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 transition duration-150"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <input
+                        id="remember-me"
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="h-5 w-5 text-orange-600 focus:ring-orange-500 border-slate-300 rounded-md transition duration-150"
+                      />
+                      <label htmlFor="remember-me" className="ml-2 block text-sm font-medium text-slate-600">
+                        Keep me logged in
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-md text-base font-semibold text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition duration-150 active:scale-95 disabled:opacity-50"
+                    >
+                      {loading ? 'Authenticating...' : 'Sign In'}
+                    </button>
+                  </div>
+                </form>
+
+                {allowSelfReg && (
+                  <div className="mt-6 pt-6 border-t border-slate-100 text-center">
+                    <p className="text-sm text-slate-600">
+                      New to the pilot?{' '}
+                      <button
+                        onClick={toggleRegister}
+                        className="font-semibold text-orange-600 hover:text-orange-700 underline focus:outline-none"
+                      >
+                        Self-register here
+                      </button>
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <form className="space-y-4" onSubmit={handleRegister}>
+                <div className="border-b border-slate-100 pb-3 mb-2">
+                  <h3 className="text-lg font-bold text-slate-900">Employee Self-Registration</h3>
+                  <p className="text-xs text-slate-500">Register as a pilot employee below.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700">Clock ID</label>
                   <input
                     type="text"
                     required
-                    value={clockId}
-                    onChange={(e) => setClockId(e.target.value)}
-                    className="block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 font-medium transition duration-150"
-                    placeholder="EMP001"
+                    value={regClockId}
+                    onChange={(e) => setRegClockId(e.target.value)}
+                    className="mt-1 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 font-medium transition"
+                    placeholder="e.g. EMP015"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-slate-700">
-                  Password
-                </label>
-                <div className="mt-1 relative rounded-md shadow-sm">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700">Full Name</label>
                   <input
-                    type="password"
+                    type="text"
                     required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 transition duration-150"
-                    placeholder="••••••••"
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    className="mt-1 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 font-medium transition"
+                    placeholder="e.g. Rajesh Kumar"
                   />
                 </div>
-              </div>
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700">Mobile Number (WhatsApp)</label>
                   <input
-                    id="remember-me"
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="h-5 w-5 text-orange-600 focus:ring-orange-500 border-slate-300 rounded-md transition duration-150"
+                    type="tel"
+                    required
+                    value={regMobile}
+                    onChange={(e) => setRegMobile(e.target.value)}
+                    className="mt-1 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 font-medium transition"
+                    placeholder="e.g. +91 98765 43210"
                   />
-                  <label htmlFor="remember-me" className="ml-2 block text-sm font-medium text-slate-600">
-                    Keep me logged in
-                  </label>
                 </div>
-              </div>
 
-              <div>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-md text-base font-semibold text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition duration-150 active:scale-95 disabled:opacity-50"
-                >
-                  {loading ? 'Authenticating...' : 'Sign In'}
-                </button>
-              </div>
-            </form>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700">Department</label>
+                  <select
+                    value={regDept}
+                    onChange={(e) => setRegDept(e.target.value)}
+                    className="mt-1 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition"
+                  >
+                    {regAssets.departments.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700">Section</label>
+                  <select
+                    value={regSect}
+                    onChange={(e) => setRegSect(e.target.value)}
+                    className="mt-1 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition"
+                  >
+                    {regAssets.sections
+                      .filter((s) => s.departmentId === regDept)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center">
+                    <label className="block text-sm font-semibold text-slate-700">Factory Access Code</label>
+                    <span className="text-[10px] text-slate-400">Pilot default: APOLLO2026</span>
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={regAccessCode}
+                    onChange={(e) => setRegAccessCode(e.target.value)}
+                    className="mt-1 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-slate-900 placeholder-slate-400 font-medium transition"
+                    placeholder="Enter Pilot Factory Code"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-md text-base font-semibold text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition duration-150 active:scale-95 disabled:opacity-50"
+                  >
+                    {loading ? 'Registering...' : 'Complete Self-Registration'}
+                  </button>
+                </div>
+
+                <div className="mt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={toggleRegister}
+                    className="text-sm font-semibold text-slate-500 hover:text-slate-700 underline focus:outline-none"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              </form>
+            )}
 
             <div className="mt-6 text-center text-xs text-slate-400">
-              Need assistance? Clock ID is printed on your physical factory badge. Pilot default password is <span className="font-semibold text-slate-600">password123</span>.
+              Need assistance? Clock ID is printed on your physical factory badge. Pilot default password is{' '}
+              <span className="font-semibold text-slate-600">password123</span>.
             </div>
           </div>
         </div>
