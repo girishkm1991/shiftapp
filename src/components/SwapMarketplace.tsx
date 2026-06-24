@@ -18,7 +18,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
   // New Swap Request Form State
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [formDate, setFormDate] = useState(selectedDate || '2026-06-25');
-  const [formShiftCode, setFormShiftCode] = useState<'A' | 'B' | 'C' | 'OFF'>('A');
+  const [formShiftCode, setFormShiftCode] = useState<'A' | 'B' | 'C' | 'OFF' | ''>('');
   const [fetchingShift, setFetchingShift] = useState(false);
   const [formSwapType, setFormSwapType] = useState<'open' | 'direct'>('open');
   const [formTargetUser, setFormTargetUser] = useState('');
@@ -67,10 +67,13 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
     }
   }, [token, selectedDate]);
 
+  const employeeId = user.id;
+
   // Fetch recommendations dynamically as date/shift changes in form
   const getRecommendations = async (date: string, code: string) => {
     try {
       setFetchingRecs(true);
+      console.log(`[ShiftSwapDebug] Validation Shift: ${code}`);
       const res = await fetch(`/api/swaps/recommendations?date=${date}&shiftCode=${code}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -86,10 +89,17 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
   const fetchShiftForDate = async (date: string) => {
     try {
       setFetchingShift(true);
+      setRecommendations([]); // Remove stale recommendations / cached values
+      setFormError(''); // Clear stale error
+      console.log(`[ShiftSwapDebug] Selected Date: ${date}`);
+      console.log(`[ShiftSwapDebug] Current Employee ID: ${employeeId}`);
+      
       const res = await fetch(`/api/wfm/shift-for-date?date=${date}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
+      console.log(`[ShiftSwapDebug] Fetched Shift: ${data.shiftCode || 'OFF'}`);
+
       if (data.onboardingRequired) {
         alert('Your weekly shift pattern configuration is incomplete. Redirecting to onboarding...');
         if (onOnboardingRequired) {
@@ -111,15 +121,17 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
 
   useEffect(() => {
     if (showCreateModal && formDate) {
+      setFormShiftCode(''); // Instantly clear stale shift code to avoid using it
       fetchShiftForDate(formDate);
     }
-  }, [formDate, showCreateModal]);
+  }, [formDate, selectedDate, employeeId, showCreateModal]);
 
   useEffect(() => {
-    if (showCreateModal && formDate && formShiftCode) {
+    // Wait until shift fetching completes and the shift code has been resolved
+    if (showCreateModal && formDate && formShiftCode && !fetchingShift) {
       getRecommendations(formDate, formShiftCode);
     }
-  }, [formDate, formShiftCode, showCreateModal]);
+  }, [formDate, formShiftCode, showCreateModal, fetchingShift]);
 
   const handleCreateSwap = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -610,8 +622,16 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                   <Award className="mr-1 h-3.5 w-3.5" />
                   Intelligent Matching Recommendations
                 </span>
-                {fetchingRecs ? (
-                  <p className="text-xs text-slate-400 mt-2 font-bold">Scanning certified builders...</p>
+                {(fetchingShift || formShiftCode === '') ? (
+                  <p className="text-xs text-slate-400 mt-2 font-bold flex items-center">
+                    <RefreshCw className="animate-spin mr-1.5 h-3.5 w-3.5 text-orange-600" />
+                    Resolving employee schedule...
+                  </p>
+                ) : fetchingRecs ? (
+                  <p className="text-xs text-slate-400 mt-2 font-bold flex items-center">
+                    <RefreshCw className="animate-spin mr-1.5 h-3.5 w-3.5 text-orange-600" />
+                    Scanning certified builders...
+                  </p>
                 ) : recommendations.length === 0 ? (
                   <p className="text-xs text-slate-400 mt-2 font-bold">No eligible matching employees available. Ensure shift dates are correct.</p>
                 ) : (
@@ -674,10 +694,16 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               <div className="flex space-x-2 pt-2">
                 <button
                   type="submit"
-                  disabled={formSubmitting || fetchingShift || formShiftCode === 'OFF'}
+                  disabled={formSubmitting || fetchingShift || formShiftCode === '' || formShiftCode === 'OFF'}
                   className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold py-3.5 rounded-xl transition shadow active:scale-95"
                 >
-                  {formSubmitting ? 'Posting Trade...' : fetchingShift ? 'Checking Schedule...' : formShiftCode === 'OFF' ? 'Cannot Swap on Off Day' : 'Post Shift Swap Request'}
+                  {formSubmitting 
+                    ? 'Posting Trade...' 
+                    : (fetchingShift || formShiftCode === '') 
+                    ? 'Checking Schedule...' 
+                    : formShiftCode === 'OFF' 
+                    ? 'Cannot Swap on Off Day' 
+                    : 'Post Shift Swap Request'}
                 </button>
                 <button
                   type="button"
