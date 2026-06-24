@@ -39,8 +39,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
   // Onboarding Step 3 default pattern state
   // 0: Sun, 1: Mon, ..., 6: Sat
-  const [pattern, setPattern] = useState<('A' | 'B' | 'C' | 'OFF')[]>([
-    'OFF', 'A', 'A', 'A', 'A', 'A', 'OFF' // Default: Sat-Sun Off, Mon-Fri Morning
+  const [pattern, setPattern] = useState<('A' | 'B' | 'C' | 'OFF' | null)[]>([
+    null, null, null, null, null, null, null
   ]);
 
   // Self-registration states
@@ -259,8 +259,14 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       if (!res.ok) throw new Error(data.error);
 
       setTempUser(data.user);
-      setStep(2);
-      await fetchAssets(token);
+      if (data.user.status === 'active') {
+        localStorage.setItem('imvelo_token', token);
+        localStorage.setItem('imvelo_user', JSON.stringify(data.user));
+        onLoginSuccess(token, data.user);
+      } else {
+        setStep(2);
+        await fetchAssets(token);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -306,6 +312,12 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   };
 
   const handleStep3 = async () => {
+    const isAnyUnconfigured = pattern.some(p => p === null);
+    if (isAnyUnconfigured) {
+      setError('Please configure your shift status (A, B, C, or OFF) for all 7 days before gaining dashboard access.');
+      return;
+    }
+
     setError('');
     setLoading(true);
 
@@ -552,8 +564,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             )}
 
             <div className="mt-6 text-center text-xs text-slate-400">
-              Need assistance? Clock ID is printed on your physical factory badge. Pilot default password is{' '}
-              <span className="font-semibold text-slate-600">password123</span>.
+              Need assistance? Sign in with System Administrator Account: <span className="font-semibold text-slate-600">ADMIN001</span> and password <span className="font-semibold text-slate-600">admin123</span> (Requires password change on first login).
             </div>
           </div>
         </div>
@@ -736,48 +747,85 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             <div className="space-y-6">
               <div className="flex items-center space-x-3 mb-2">
                 <Calendar className="h-6 w-6 text-orange-600" />
-                <h3 className="text-lg font-bold text-slate-900">Define Weekly Default Shifts</h3>
+                <h3 className="text-lg font-bold text-slate-900">Configure Your Weekly Schedule</h3>
               </div>
               <p className="text-sm text-slate-500 leading-relaxed">
-                Configure your typical schedule. This enables our Intelligent Eligibility Engine to recommend matching swaps and helps supervisors plan workforce resources.
+                Configure your typical weekly shift schedule. This information is mandatory and enables shift swap recommendations, calendar generation, and conflict checking.
               </p>
 
               <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, idx) => (
-                  <div key={day} className="flex flex-col sm:flex-row sm:items-center justify-between py-2 border-b border-slate-200 last:border-none">
-                    <span className="text-sm font-bold text-slate-700 mb-1.5 sm:mb-0">{day}</span>
-                    <div className="flex bg-slate-200/60 p-1 rounded-xl">
+                {[
+                  { name: 'Monday', idx: 1 },
+                  { name: 'Tuesday', idx: 2 },
+                  { name: 'Wednesday', idx: 3 },
+                  { name: 'Thursday', idx: 4 },
+                  { name: 'Friday', idx: 5 },
+                  { name: 'Saturday', idx: 6 },
+                  { name: 'Sunday', idx: 0 }
+                ].map((day) => (
+                  <div key={day.name} className="flex flex-col sm:flex-row sm:items-center justify-between py-3 border-b border-slate-100 last:border-none">
+                    <span className="text-sm font-bold text-slate-700 mb-2 sm:mb-0">{day.name}</span>
+                    <div className="flex bg-slate-200/50 p-1.5 rounded-xl gap-1">
                       {[
-                        { code: 'A', name: 'A (Morning)' },
-                        { code: 'B', name: 'B (Noon)' },
-                        { code: 'C', name: 'C (Night)' },
-                        { code: 'OFF', name: 'OFF' }
-                      ].map(opt => (
-                        <button
-                          key={opt.code}
-                          type="button"
-                          onClick={() => {
-                            const newPattern = [...pattern];
-                            newPattern[idx] = opt.code as any;
-                            setPattern(newPattern);
-                          }}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all duration-150 ${pattern[idx] === opt.code ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}
-                        >
-                          {opt.code}
-                        </button>
-                      ))}
+                        { code: 'A', label: 'A' },
+                        { code: 'B', label: 'B' },
+                        { code: 'C', label: 'C' },
+                        { code: 'OFF', label: 'OFF' }
+                      ].map(opt => {
+                        const isSelected = pattern[day.idx] === opt.code;
+                        return (
+                          <button
+                            key={opt.code}
+                            type="button"
+                            onClick={() => {
+                              const newPattern = [...pattern];
+                              newPattern[day.idx] = opt.code as any;
+                              setPattern(newPattern);
+                            }}
+                            className={`px-4 py-2 text-sm font-extrabold rounded-lg transition-all duration-150 min-w-[55px] ${
+                              isSelected
+                                ? 'bg-orange-600 text-white shadow-md scale-105'
+                                : 'text-slate-600 hover:text-slate-800 hover:bg-slate-300/30'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Dynamic Weekly Off Config Summary */}
+              <div className="bg-orange-50/70 border border-orange-200/80 p-4 rounded-xl text-sm text-orange-800">
+                <span className="font-bold">Active Weekly Off: </span>
+                {(() => {
+                  const offDaysList = [
+                    { name: 'Monday', idx: 1 },
+                    { name: 'Tuesday', idx: 2 },
+                    { name: 'Wednesday', idx: 3 },
+                    { name: 'Thursday', idx: 4 },
+                    { name: 'Friday', idx: 5 },
+                    { name: 'Saturday', idx: 6 },
+                    { name: 'Sunday', idx: 0 }
+                  ]
+                    .filter(d => pattern[d.idx] === 'OFF')
+                    .map(d => d.name);
+                  
+                  return offDaysList.length > 0 
+                    ? offDaysList.join(' + ') + ' OFF' 
+                    : 'No weekly off selected yet (Select OFF for days you are not scheduled)';
+                })()}
               </div>
 
               <button
                 type="button"
                 onClick={handleStep3}
                 disabled={loading}
-                className="w-full flex items-center justify-center py-4 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md font-bold text-base transition active:scale-95 disabled:opacity-50"
+                className="w-full flex items-center justify-center py-4 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md font-extrabold text-base transition active:scale-95 disabled:opacity-50"
               >
-                Complete Onboarding & Start
+                Complete Onboarding & Access Dashboard
               </button>
             </div>
           )}

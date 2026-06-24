@@ -41,7 +41,7 @@ declare global {
 
 // Public endpoint to fetch registration settings, departments and sections
 apiRouter.get('/auth/config', (req: Request, res: Response) => {
-  const allowSelfRegistration = process.env.ALLOW_SELF_REGISTRATION !== 'false';
+  const allowSelfRegistration = process.env.ALLOW_SELF_REGISTRATION === 'true';
   res.json({
     allowSelfRegistration,
     departments: dbInstance.getDepartments(),
@@ -51,7 +51,7 @@ apiRouter.get('/auth/config', (req: Request, res: Response) => {
 
 // Self-registration endpoint
 apiRouter.post('/auth/register', (req: Request, res: Response) => {
-  const allowSelfRegistration = process.env.ALLOW_SELF_REGISTRATION !== 'false';
+  const allowSelfRegistration = process.env.ALLOW_SELF_REGISTRATION === 'true';
   if (!allowSelfRegistration) {
     return res.status(403).json({ error: 'Self-registration is currently disabled.' });
   }
@@ -117,12 +117,21 @@ apiRouter.post('/auth/login', (req: Request, res: Response) => {
 
   const user = dbInstance.getUsers().find(u => u.clockId.toUpperCase() === clockId.toUpperCase());
   if (!user) {
-    return res.status(401).json({ error: 'Invalid Clock ID or Password. (Pilot passwords are: password123)' });
+    return res.status(401).json({ error: 'Invalid Clock ID or Password.' });
   }
 
-  // Under pilot, check simple placeholder password or 'password123'
-  if (password !== 'password123' && user.passwordHash !== 'sha256_password123_placeholder') {
-    return res.status(401).json({ error: 'Invalid password. Try password123' });
+  // Validate password
+  let isCorrect = false;
+  if (user.passwordHash === 'sha256_admin123_placeholder') {
+    isCorrect = (password === 'admin123');
+  } else if (user.passwordHash === 'sha256_password123_placeholder') {
+    isCorrect = (password === 'password123');
+  } else {
+    isCorrect = (password === user.passwordHash);
+  }
+
+  if (!isCorrect) {
+    return res.status(401).json({ error: 'Invalid password.' });
   }
 
   // Generate simple token (using user id for simplicity as bearer)
@@ -166,8 +175,13 @@ apiRouter.post('/auth/onboard/step1', requireAuth, (req: Request, res: Response)
   dbInstance.updateState(state => {
     const user = state.users.find(u => u.id === req.user!.id);
     if (user) {
-      user.passwordHash = 'sha256_modified_' + uuid();
-      user.status = 'onboarding_step2';
+      user.passwordHash = newPassword;
+      if (user.roleId === '3') {
+        user.status = 'active';
+        user.onboardingCompletedAt = new Date().toISOString();
+      } else {
+        user.status = 'onboarding_step2';
+      }
       
       state.auditLogs.push({
         id: uuid(),

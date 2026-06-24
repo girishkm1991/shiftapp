@@ -103,8 +103,8 @@ export default function App() {
     setActiveTab(tab);
   };
 
-  // If not authenticated, render Login/Onboarding screen
-  if (!token || !user) {
+  // If not authenticated or onboarding is not fully completed, render Login/Onboarding screen
+  if (!token || !user || user.status !== 'active') {
     return (
       <Login
         onLoginSuccess={(authToken, authenticatedUser) => {
