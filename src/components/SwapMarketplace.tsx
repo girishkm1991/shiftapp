@@ -6,9 +6,10 @@ interface SwapMarketplaceProps {
   user: User;
   token: string;
   selectedDate?: string;
+  onOnboardingRequired?: () => void;
 }
 
-export default function SwapMarketplace({ user, token, selectedDate }: SwapMarketplaceProps) {
+export default function SwapMarketplace({ user, token, selectedDate, onOnboardingRequired }: SwapMarketplaceProps) {
   const [swaps, setSwaps] = useState<any[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
@@ -18,6 +19,7 @@ export default function SwapMarketplace({ user, token, selectedDate }: SwapMarke
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [formDate, setFormDate] = useState(selectedDate || '2026-06-25');
   const [formShiftCode, setFormShiftCode] = useState<'A' | 'B' | 'C' | 'OFF'>('A');
+  const [fetchingShift, setFetchingShift] = useState(false);
   const [formSwapType, setFormSwapType] = useState<'open' | 'direct'>('open');
   const [formTargetUser, setFormTargetUser] = useState('');
   const [formRemarks, setFormRemarks] = useState('');
@@ -80,6 +82,38 @@ export default function SwapMarketplace({ user, token, selectedDate }: SwapMarke
       setFetchingRecs(false);
     }
   };
+
+  const fetchShiftForDate = async (date: string) => {
+    try {
+      setFetchingShift(true);
+      const res = await fetch(`/api/wfm/shift-for-date?date=${date}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.onboardingRequired) {
+        alert('Your weekly shift pattern configuration is incomplete. Redirecting to onboarding...');
+        if (onOnboardingRequired) {
+          onOnboardingRequired();
+        }
+        return;
+      }
+      if (data.shiftCode) {
+        setFormShiftCode(data.shiftCode);
+      } else {
+        setFormShiftCode('OFF');
+      }
+    } catch (e) {
+      console.error('[SwapMarketplace] Error fetching shift for date:', e);
+    } finally {
+      setFetchingShift(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showCreateModal && formDate) {
+      fetchShiftForDate(formDate);
+    }
+  }, [formDate, showCreateModal]);
 
   useEffect(() => {
     if (showCreateModal && formDate && formShiftCode) {
@@ -507,15 +541,30 @@ export default function SwapMarketplace({ user, token, selectedDate }: SwapMarke
 
                 <div>
                   <label className="block text-xs font-black uppercase text-slate-400">Your Scheduled Shift</label>
-                  <select
-                    value={formShiftCode}
-                    onChange={(e) => setFormShiftCode(e.target.value as any)}
-                    className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800"
-                  >
-                    <option value="A">Morning (A Shift)</option>
-                    <option value="B">Noon (B Shift)</option>
-                    <option value="C">Night (C Shift)</option>
-                  </select>
+                  <div className="relative mt-1">
+                    <input
+                      type="text"
+                      readOnly
+                      value={
+                        fetchingShift 
+                          ? 'Checking Schedule...' 
+                          : formShiftCode === 'A' 
+                          ? 'Morning (A Shift)' 
+                          : formShiftCode === 'B' 
+                          ? 'Noon (B Shift)' 
+                          : formShiftCode === 'C' 
+                          ? 'Night (C Shift)' 
+                          : formShiftCode === 'OFF'
+                          ? 'Weekly Off (OFF)'
+                          : 'None'
+                      }
+                      className={`block w-full px-4 py-3 border rounded-xl font-bold text-sm focus:outline-none cursor-not-allowed ${
+                        formShiftCode === 'OFF' 
+                          ? 'bg-rose-50 border-rose-200 text-rose-700' 
+                          : 'bg-slate-100 border-slate-200 text-slate-600'
+                      }`}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -625,10 +674,10 @@ export default function SwapMarketplace({ user, token, selectedDate }: SwapMarke
               <div className="flex space-x-2 pt-2">
                 <button
                   type="submit"
-                  disabled={formSubmitting}
-                  className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-3.5 rounded-xl transition shadow active:scale-95"
+                  disabled={formSubmitting || fetchingShift || formShiftCode === 'OFF'}
+                  className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold py-3.5 rounded-xl transition shadow active:scale-95"
                 >
-                  {formSubmitting ? 'Posting Trade...' : 'Post Shift Swap Request'}
+                  {formSubmitting ? 'Posting Trade...' : fetchingShift ? 'Checking Schedule...' : formShiftCode === 'OFF' ? 'Cannot Swap on Off Day' : 'Post Shift Swap Request'}
                 </button>
                 <button
                   type="button"

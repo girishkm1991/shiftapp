@@ -250,6 +250,11 @@ export default function App() {
               user={user}
               token={token}
               selectedDate={selectedDate}
+              onOnboardingRequired={() => {
+                const updatedUser = { ...user, status: 'onboarding_step3' };
+                localStorage.setItem('imvelo_user', JSON.stringify(updatedUser));
+                setUser(updatedUser as any);
+              }}
             />
           )}
 

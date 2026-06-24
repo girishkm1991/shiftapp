@@ -290,13 +290,51 @@ apiRouter.post('/auth/onboard/step3', requireAuth, (req: Request, res: Response)
 });
 
 
+// Helper to get employee shift code for a date based on explicit overrides or weekly pattern
+function getEmployeeShiftForDate(userId: string, dateStr: string): 'A' | 'B' | 'C' | 'OFF' | null {
+  console.log(`[ShiftLookup] Starting lookup for user ${userId} on date ${dateStr}`);
+  
+  // 1. Check existing schedule overrides (shiftAssignments)
+  const assignments = dbInstance.getShiftAssignments();
+  const directAssign = assignments.find(a => a.userId === userId && a.date === dateStr);
+  if (directAssign) {
+    console.log(`[ShiftLookup] Found explicit shift assignment override for user ${userId} on date ${dateStr}: ${directAssign.shiftCode}`);
+    return directAssign.shiftCode as any;
+  }
+
+  // 2. Derive from employee weekly default pattern
+  // Timezone-safe parsing of date string format YYYY-MM-DD
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) {
+    console.log(`[ShiftLookup] ERROR: Invalid date format: ${dateStr}. Expected YYYY-MM-DD.`);
+    return null;
+  }
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  const d = new Date(year, month - 1, day);
+  const dayOfWeek = d.getDay(); // 0: Sun, 1: Mon, etc.
+
+  const defaultPatterns = dbInstance.getEmployeeDefaultShiftPatterns();
+  const pattern = defaultPatterns.find(p => p.userId === userId && p.dayOfWeek === dayOfWeek);
+  
+  if (pattern) {
+    console.log(`[ShiftLookup] Derived shift from weekly default pattern for user ${userId} on date ${dateStr} (dayOfWeek ${dayOfWeek}): ${pattern.shiftCode}`);
+    return pattern.shiftCode as any;
+  }
+
+  // 3. No shift pattern exists
+  console.log(`[ShiftLookup] FAILED: No shift pattern or assignment exists for user ${userId} on date ${dateStr}. returning null.`);
+  return null;
+}
+
+
 // --- MODULE 2: ELIGIBILITY & RECOMMENDATION ENGINE ---
 
 // Helper logic to run Intelligent Eligibility Checks
 function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' | 'C' | 'OFF'): { eligible: boolean; reasons: string[] } {
   const reasons: string[] = [];
   const users = dbInstance.getUsers();
-  const assignments = dbInstance.getShiftAssignments();
   const leaves = dbInstance.getLeaveRequests();
   const machineMappings = dbInstance.getEmployeeMachineMapping();
   const targetUser = users.find(u => u.id === userId);
@@ -311,9 +349,9 @@ function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' 
   }
 
   // 2. Is target user already working on this exact date?
-  const existingAssign = assignments.find(a => a.userId === userId && a.date === date);
-  if (existingAssign && existingAssign.shiftCode !== 'OFF') {
-    reasons.push(`Already working ${existingAssign.shiftCode} Shift on this day.`);
+  const existingAssignCode = getEmployeeShiftForDate(userId, date);
+  if (existingAssignCode && existingAssignCode !== 'OFF') {
+    reasons.push(`Already working ${existingAssignCode} Shift on this day.`);
   }
 
   // 3. Is target user on Leave on this day?
@@ -332,17 +370,33 @@ function checkEligibility(userId: string, date: string, reqShiftCode: 'A' | 'B' 
 
   // 5. Weekly overtime hours restriction
   // Count hours for this week (Mon-Sun surrounding the date)
-  const targetDate = new Date(date);
+  const parts = date.split('-');
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const dayVal = parseInt(parts[2], 10);
+  const targetDate = new Date(year, month - 1, dayVal);
   const day = targetDate.getDay();
+  
+  // Calculate Monday of this week
   const diffToMon = targetDate.getDate() - day + (day === 0 ? -6 : 1);
   const monday = new Date(targetDate.setDate(diffToMon));
-  const sunday = new Date(new Date(monday).setDate(monday.getDate() + 6));
   
-  const startStr = monday.toISOString().split('T')[0];
-  const endStr = sunday.toISOString().split('T')[0];
+  let weekAssignCount = 0;
+  for (let i = 0; i < 7; i++) {
+    const currentDayDate = new Date(monday);
+    currentDayDate.setDate(monday.getDate() + i);
+    const y = currentDayDate.getFullYear();
+    const m = String(currentDayDate.getMonth() + 1).padStart(2, '0');
+    const dStr = String(currentDayDate.getDate()).padStart(2, '0');
+    const curDateStr = `${y}-${m}-${dStr}`;
+    
+    const curShift = getEmployeeShiftForDate(userId, curDateStr);
+    if (curShift && curShift !== 'OFF') {
+      weekAssignCount++;
+    }
+  }
 
-  const weekAssigns = assignments.filter(a => a.userId === userId && a.date >= startStr && a.date <= endStr && a.shiftCode !== 'OFF');
-  const prospectiveHours = (weekAssigns.length + 1) * 8; // Each shift is 8 hours
+  const prospectiveHours = (weekAssignCount + 1) * 8; // Each shift is 8 hours
   if (prospectiveHours > 60) {
     reasons.push('Swap would exceed the weekly maximum working limit (60 hours).');
   }
@@ -463,10 +517,9 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
   const requesterId = req.user!.id;
   
   // Verify requester actually has this assignment
-  const assignments = dbInstance.getShiftAssignments();
-  const currentAssign = assignments.find(a => a.userId === requesterId && a.date === date);
-  if (!currentAssign || currentAssign.shiftCode !== shiftCode) {
-    return res.status(400).json({ error: `You are not scheduled for ${shiftCode} Shift on ${date}. Current: ${currentAssign?.shiftCode || 'None'}` });
+  const currentAssignCode = getEmployeeShiftForDate(requesterId, date);
+  if (!currentAssignCode || currentAssignCode !== shiftCode) {
+    return res.status(400).json({ error: `You are not scheduled for ${shiftCode} Shift on ${date}. Current: ${currentAssignCode || 'None'}` });
   }
 
   const newSwapId = 'swap_' + uuid();
@@ -1142,11 +1195,59 @@ apiRouter.post('/notifications/read-all', requireAuth, (req: Request, res: Respo
 
 // --- MODULE 7: DASHBOARD & WFM ---
 
-// Employee calendar assignments
+// Get dynamic shift for date
+apiRouter.get('/wfm/shift-for-date', requireAuth, (req: Request, res: Response) => {
+  const { date } = req.query;
+  if (!date) {
+    return res.status(400).json({ error: 'date is required' });
+  }
+  const userId = req.user!.id;
+  
+  // Check if user has ANY default patterns configured
+  const defaultPatterns = dbInstance.getEmployeeDefaultShiftPatterns().filter(p => p.userId === userId);
+  if (defaultPatterns.length === 0) {
+    console.log(`[shift-for-date] User ${userId} has no weekly pattern configured. Onboarding required.`);
+    return res.json({ shiftCode: null, onboardingRequired: true });
+  }
+
+  const shiftCode = getEmployeeShiftForDate(userId, date as string);
+  res.json({ shiftCode });
+});
+
+// Employee calendar assignments with dynamic backfills
 apiRouter.get('/wfm/schedule', requireAuth, (req: Request, res: Response) => {
-  const assignments = dbInstance.getShiftAssignments().filter(a => a.userId === req.user!.id);
-  const leaves = dbInstance.getLeaveRequests().filter(l => l.userId === req.user!.id && l.status === 'approved');
-  const swaps = dbInstance.getSwapRequests().filter(s => s.requesterId === req.user!.id && (s.status === 'pending' || s.status === 'approved'));
+  const userId = req.user!.id;
+  const dbAssignments = dbInstance.getShiftAssignments().filter(a => a.userId === userId);
+  const leaves = dbInstance.getLeaveRequests().filter(l => l.userId === userId && l.status === 'approved');
+  const swaps = dbInstance.getSwapRequests().filter(s => s.requesterId === userId && (s.status === 'pending' || s.status === 'approved'));
+
+  // Generate derived assignments for May 1st, 2026 to August 31st, 2026 (pilot timeline)
+  const assignments: any[] = [];
+  const start = new Date('2026-05-01');
+  const end = new Date('2026-08-31');
+
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    const explicit = dbAssignments.find(a => a.date === dateStr);
+    if (explicit) {
+      assignments.push(explicit);
+    } else {
+      const shiftCode = getEmployeeShiftForDate(userId, dateStr);
+      if (shiftCode) {
+        assignments.push({
+          id: `derived_${userId}_${dateStr}`,
+          userId,
+          date: dateStr,
+          shiftCode,
+          machineId: req.user!.machineId
+        });
+      }
+    }
+  }
 
   res.json({ assignments, leaves, swaps });
 });
@@ -1158,7 +1259,6 @@ apiRouter.get('/supervisor/dashboard', requireAuth, (req: Request, res: Response
   }
 
   const users = dbInstance.getUsers();
-  const assignments = dbInstance.getShiftAssignments();
   const swaps = dbInstance.getSwapRequests();
   const leaves = dbInstance.getLeaveRequests();
 
@@ -1173,14 +1273,14 @@ apiRouter.get('/supervisor/dashboard', requireAuth, (req: Request, res: Response
 
   // Team availability today
   const teamStatusToday = teamUsers.map(user => {
-    const assign = assignments.find(a => a.userId === user.id && a.date === todayStr);
+    const assignCode = getEmployeeShiftForDate(user.id, todayStr) || 'OFF';
     const leave = leaves.find(l => l.userId === user.id && l.status === 'approved' && todayStr >= l.startDate && todayStr <= l.endDate);
 
     return {
       userId: user.id,
       name: user.name,
       clockId: user.clockId,
-      shiftCode: leave ? 'LEAVE' : (assign ? assign.shiftCode : 'OFF'),
+      shiftCode: leave ? 'LEAVE' : assignCode,
       leaveType: leave?.leaveType,
       machineCode: dbInstance.getMachines().find(m => m.id === user.machineId)?.code || 'General'
     };
