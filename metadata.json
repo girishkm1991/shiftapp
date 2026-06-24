@@ -1,0 +1,6 @@
+{
+  "name": "Imvelo Shift",
+  "description": "Enterprise Shift Swap & Leave Management System for Apollo Tyres",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

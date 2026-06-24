@@ -1,0 +1,68 @@
+# Enterprise Docker Compose Cluster for Imvelo Shift Scalability
+version: '3.8'
+
+services:
+  # 1. Full-Stack Node Express & React Core App
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: imvelo-shift-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=mysql://imvelo_user:imvelo_secure_password@mysql:3306/imvelo_shift_db
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=imvelo_jwt_secret_pilot_scale
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - app_data:/app/data
+    restart: always
+    networks:
+      - imvelo_network
+
+  # 2. Relational Database (MySQL)
+  mysql:
+    image: mysql:8.0
+    container_name: imvelo-shift-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_DATABASE=imvelo_shift_db
+      - MYSQL_USER=imvelo_user
+      - MYSQL_PASSWORD=imvelo_secure_password
+      - MYSQL_ROOT_PASSWORD=imvelo_root_super_secure_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./server/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql # Auto-initializes on startup
+    restart: always
+    networks:
+      - imvelo_network
+
+  # 3. Cache & Queue Engine (Redis for BullMQ background workers)
+  redis:
+    image: redis:7-alpine
+    container_name: imvelo-shift-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - imvelo_network
+
+volumes:
+  app_data:
+    driver: local
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  imvelo_network:
+    driver: bridge
