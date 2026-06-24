@@ -5,6 +5,7 @@ import { getNotificationService } from '../services/NotificationService';
 import { getCacheService } from '../services/CacheService';
 import { getQueueService } from '../services/QueueService';
 import { SocketService } from '../services/SocketService';
+import { ScheduleResolutionService } from '../services/ScheduleResolutionService';
 
 
 export const apiRouter = Router();
@@ -291,41 +292,8 @@ apiRouter.post('/auth/onboard/step3', requireAuth, (req: Request, res: Response)
 
 
 // Helper to get employee shift code for a date based on explicit overrides or weekly pattern
-function getEmployeeShiftForDate(userId: string, dateStr: string): 'A' | 'B' | 'C' | 'OFF' | null {
-  console.log(`[ShiftLookup] Starting lookup for user ${userId} on date ${dateStr}`);
-  
-  // 1. Check existing schedule overrides (shiftAssignments)
-  const assignments = dbInstance.getShiftAssignments();
-  const directAssign = assignments.find(a => a.userId === userId && a.date === dateStr);
-  if (directAssign) {
-    console.log(`[ShiftLookup] Found explicit shift assignment override for user ${userId} on date ${dateStr}: ${directAssign.shiftCode}`);
-    return directAssign.shiftCode as any;
-  }
-
-  // 2. Derive from employee weekly default pattern
-  // Timezone-safe parsing of date string format YYYY-MM-DD
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) {
-    console.log(`[ShiftLookup] ERROR: Invalid date format: ${dateStr}. Expected YYYY-MM-DD.`);
-    return null;
-  }
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10);
-  const day = parseInt(parts[2], 10);
-  const d = new Date(year, month - 1, day);
-  const dayOfWeek = d.getDay(); // 0: Sun, 1: Mon, etc.
-
-  const defaultPatterns = dbInstance.getEmployeeDefaultShiftPatterns();
-  const pattern = defaultPatterns.find(p => p.userId === userId && p.dayOfWeek === dayOfWeek);
-  
-  if (pattern) {
-    console.log(`[ShiftLookup] Derived shift from weekly default pattern for user ${userId} on date ${dateStr} (dayOfWeek ${dayOfWeek}): ${pattern.shiftCode}`);
-    return pattern.shiftCode as any;
-  }
-
-  // 3. No shift pattern exists
-  console.log(`[ShiftLookup] FAILED: No shift pattern or assignment exists for user ${userId} on date ${dateStr}. returning null.`);
-  return null;
+function getEmployeeShiftForDate(userId: string, dateStr: string): 'A' | 'B' | 'C' | 'OFF' {
+  return ScheduleResolutionService.resolveEmployeeShift(userId, dateStr).shiftCode;
 }
 
 
@@ -442,11 +410,9 @@ apiRouter.get('/swaps/recommendations', requireAuth, (req: Request, res: Respons
         score += 30;
         notes.push('Same Certified Machine');
       }
-      // Check default pattern matches off
-      const day = new Date(date as string).getDay();
-      const defaultPatterns = dbInstance.getEmployeeDefaultShiftPatterns();
-      const userPattern = defaultPatterns.find(p => p.userId === user.id && p.dayOfWeek === day);
-      if (userPattern && userPattern.shiftCode === 'OFF') {
+      // Check resolved shift matches OFF
+      const { shiftCode: resolvedCode } = ScheduleResolutionService.resolveEmployeeShift(user.id, date as string);
+      if (resolvedCode === 'OFF') {
         score += 20;
         notes.push('Normally OFF on this day');
       }
@@ -1210,8 +1176,9 @@ apiRouter.get('/wfm/shift-for-date', requireAuth, (req: Request, res: Response) 
     return res.json({ shiftCode: null, onboardingRequired: true });
   }
 
-  const shiftCode = getEmployeeShiftForDate(userId, date as string);
-  res.json({ shiftCode });
+  const { shiftCode, source } = ScheduleResolutionService.resolveEmployeeShift(userId, date as string);
+  ScheduleResolutionService.logResolution('Swap Dialog', userId, date as string, shiftCode, source);
+  res.json({ shiftCode, source });
 });
 
 // Employee calendar assignments with dynamic backfills
@@ -1234,9 +1201,17 @@ apiRouter.get('/wfm/schedule', requireAuth, (req: Request, res: Response) => {
 
     const explicit = dbAssignments.find(a => a.date === dateStr);
     if (explicit) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (dateStr === todayStr) {
+        ScheduleResolutionService.logResolution('Dashboard', userId, dateStr, explicit.shiftCode, 'Explicit supervisor-approved assignment');
+      }
       assignments.push(explicit);
     } else {
-      const shiftCode = getEmployeeShiftForDate(userId, dateStr);
+      const { shiftCode, source } = ScheduleResolutionService.resolveEmployeeShift(userId, dateStr);
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (dateStr === todayStr) {
+        ScheduleResolutionService.logResolution('Dashboard', userId, dateStr, shiftCode, source);
+      }
       if (shiftCode) {
         assignments.push({
           id: `derived_${userId}_${dateStr}`,

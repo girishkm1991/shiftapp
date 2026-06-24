@@ -73,7 +73,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
   const getRecommendations = async (date: string, code: string) => {
     try {
       setFetchingRecs(true);
-      console.log(`[ShiftSwapDebug] Validation Shift: ${code}`);
+      console.log(`Validation Shift: ${code}`);
       const res = await fetch(`/api/swaps/recommendations?date=${date}&shiftCode=${code}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -91,14 +91,14 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
       setFetchingShift(true);
       setRecommendations([]); // Remove stale recommendations / cached values
       setFormError(''); // Clear stale error
-      console.log(`[ShiftSwapDebug] Selected Date: ${date}`);
-      console.log(`[ShiftSwapDebug] Current Employee ID: ${employeeId}`);
+      console.log(`Selected Date: ${date}`);
+      console.log(`Current Employee ID: ${employeeId}`);
       
       const res = await fetch(`/api/wfm/shift-for-date?date=${date}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      console.log(`[ShiftSwapDebug] Fetched Shift: ${data.shiftCode || 'OFF'}`);
+      console.log(`Fetched Shift: ${data.shiftCode || 'OFF'}`);
 
       if (data.onboardingRequired) {
         alert('Your weekly shift pattern configuration is incomplete. Redirecting to onboarding...');
