@@ -753,37 +753,26 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               </div>
 
               <div>
-                <label className="block text-xs font-black uppercase text-slate-400">Desired Shift *</label>
-                <select
-                  required
-                  value={formRequestedShiftCode}
-                  onChange={(e: any) => {
-                    setFormRequestedShiftCode(e.target.value);
-                    setFormTargetUser(''); // Reset target employee on shift change
-                  }}
-                  className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
-                >
-                  <option value="">-- Select Desired Shift --</option>
-                  <option value="A">A Shift</option>
-                  <option value="B">B Shift</option>
-                  <option value="C">C Shift</option>
-                  <option value="OFF">Weekly OFF</option>
-                </select>
-              </div>
-
-              <div>
                 <label className="block text-xs font-black uppercase text-slate-400">Swap Type</label>
                 <div className="flex bg-slate-100 p-1 rounded-xl mt-1">
                   <button
                     type="button"
-                    onClick={() => setFormSwapType('open')}
+                    onClick={() => {
+                      setFormSwapType('open');
+                      setFormRequestedShiftCode('');
+                      setFormTargetUser('');
+                    }}
                     className={`flex-1 py-2 text-xs font-extrabold rounded-lg transition ${formSwapType === 'open' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
                   >
                     Open Shift Marketplace
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFormSwapType('direct')}
+                    onClick={() => {
+                      setFormSwapType('direct');
+                      setFormRequestedShiftCode('');
+                      setFormTargetUser('');
+                    }}
                     className={`flex-1 py-2 text-xs font-extrabold rounded-lg transition ${formSwapType === 'direct' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
                   >
                     Direct Swap
@@ -791,66 +780,91 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                 </div>
               </div>
 
-              {formSwapType === 'direct' && (
+              {formSwapType === 'open' ? (
+                <div>
+                  <label className="block text-xs font-black uppercase text-slate-400">Desired Shift *</label>
+                  <select
+                    required
+                    value={formRequestedShiftCode}
+                    onChange={(e: any) => {
+                      setFormRequestedShiftCode(e.target.value);
+                      setFormTargetUser(''); // Reset target employee on shift change
+                    }}
+                    className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
+                  >
+                    <option value="">-- Select Desired Shift --</option>
+                    <option value="A">A Shift</option>
+                    <option value="B">B Shift</option>
+                    <option value="C">C Shift</option>
+                    <option value="OFF">Weekly OFF</option>
+                  </select>
+                </div>
+              ) : (
                 <div className="space-y-3">
-                  {!formRequestedShiftCode ? (
-                    <div className="text-xs bg-amber-50 border-l-4 border-amber-500 text-amber-800 p-3.5 rounded-r-xl font-bold">
-                      ⚠️ Please select a Desired Shift above first to find pilots currently scheduled for that shift.
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block text-xs font-black uppercase text-slate-400">
-                        Target Employee (Pilots scheduled for {formRequestedShiftCode === 'A' ? 'A Shift' : formRequestedShiftCode === 'B' ? 'B Shift' : formRequestedShiftCode === 'C' ? 'C Shift' : 'Weekly Off (OFF)'})
-                      </label>
-                      <select
-                        value={formTargetUser}
-                        onChange={(e) => setFormTargetUser(e.target.value)}
-                        className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
-                      >
-                        <option value="">-- Select Employee --</option>
-                        {employeesWithShifts
-                          .filter(e => e.id !== user.id && e.shiftCode === formRequestedShiftCode)
-                          .map(e => (
-                            <option key={e.id} value={e.id}>
-                              {e.name} ({e.clockId})
-                            </option>
-                          ))
+                  <div>
+                    <label className="block text-xs font-black uppercase text-slate-400">Target Employee *</label>
+                    <select
+                      required
+                      value={formTargetUser}
+                      onChange={(e) => {
+                        const targetId = e.target.value;
+                        setFormTargetUser(targetId);
+                        if (targetId) {
+                          const targetEmp = employeesWithShifts.find(emp => emp.id === targetId);
+                          if (targetEmp) {
+                            setFormRequestedShiftCode(targetEmp.shiftCode || 'OFF');
+                          } else {
+                            setFormRequestedShiftCode('');
+                          }
+                        } else {
+                          setFormRequestedShiftCode('');
                         }
-                      </select>
+                      }}
+                      className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
+                    >
+                      <option value="">-- Select Target Employee --</option>
+                      {employeesWithShifts
+                        .filter(e => e.id !== user.id)
+                        .map(e => (
+                          <option key={e.id} value={e.id}>
+                            {e.name} ({e.clockId})
+                          </option>
+                        ))
+                      }
+                    </select>
+                  </div>
 
-                      {formTargetUser && (() => {
-                        const targetEmp = employeesWithShifts.find(emp => emp.id === formTargetUser);
-                        if (!targetEmp) return null;
-                        return (
-                          <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 animate-in fade-in duration-200">
-                            <h5 className="text-xs font-black uppercase text-slate-400 tracking-wider">SELECTED PILOT DETAILS</h5>
-                            
-                            <div className="space-y-2 text-xs">
-                              <div>
-                                <span className="block text-[10px] text-slate-400 uppercase font-black">Name:</span>
-                                <span className="text-sm font-extrabold text-slate-800">{targetEmp.name}</span>
-                              </div>
-                              <div>
-                                <span className="block text-[10px] text-slate-400 uppercase font-black">Clock ID:</span>
-                                <span className="text-sm font-extrabold text-slate-800">{targetEmp.clockId}</span>
-                              </div>
-                              <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
-                                <div>
-                                  <span className="block text-[10px] text-slate-400 uppercase font-black">SHIFT:</span>
-                                  <span className="text-sm font-black text-orange-600">
-                                    {targetEmp.shiftCode === 'A' ? 'Morning (A Shift)' : targetEmp.shiftCode === 'B' ? 'Noon (B Shift)' : targetEmp.shiftCode === 'C' ? 'Night (C Shift)' : 'Weekly Off (OFF)'}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
-                                  {targetEmp.shiftCode} Shift
-                                </span>
-                              </div>
-                            </div>
+                  {formTargetUser && (() => {
+                    const targetEmp = employeesWithShifts.find(emp => emp.id === formTargetUser);
+                    if (!targetEmp) return null;
+                    return (
+                      <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 animate-in fade-in duration-200">
+                        <h5 className="text-xs font-black uppercase text-slate-400 tracking-wider">SELECTED PILOT DETAILS</h5>
+                        
+                        <div className="space-y-2 text-xs font-bold text-slate-700">
+                          <div>
+                            <span className="block text-[10px] text-slate-400 uppercase font-black">Name:</span>
+                            <span className="text-sm font-extrabold text-slate-800">{targetEmp.name}</span>
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
+                          <div>
+                            <span className="block text-[10px] text-slate-400 uppercase font-black">Clock ID:</span>
+                            <span className="text-sm font-extrabold text-slate-800">{targetEmp.clockId}</span>
+                          </div>
+                          <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                            <div>
+                              <span className="block text-[10px] text-slate-400 uppercase font-black">SHIFT FOR THIS DATE:</span>
+                              <span className="text-sm font-black text-orange-600">
+                                {targetEmp.shiftCode === 'A' ? 'Morning (A Shift)' : targetEmp.shiftCode === 'B' ? 'Noon (B Shift)' : targetEmp.shiftCode === 'C' ? 'Night (C Shift)' : 'Weekly Off (OFF)'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
+                              {targetEmp.shiftCode} Shift
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

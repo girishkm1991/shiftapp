@@ -205,6 +205,7 @@ export class Database {
   public getEmployeeDefaultShiftPatterns(): EmployeeDefaultShiftPattern[] { return this.state.employeeDefaultShiftPatterns; }
   public getShifts(): Shift[] { return this.state.shifts; }
   public getShiftAssignments(): ShiftAssignment[] { return this.state.shiftAssignments; }
+  public getShiftTemplates(): ShiftTemplate[] { return this.state.shiftTemplates || []; }
   public getSwapRequests(): SwapRequest[] { return this.state.swapRequests; }
   public getSwapVolunteers(): SwapVolunteer[] { return this.state.swapVolunteers; }
   public getLeaveRequests(): LeaveRequest[] { return this.state.leaveRequests; }

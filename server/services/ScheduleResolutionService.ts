@@ -1,6 +1,57 @@
 import { dbInstance } from '../db/database';
+import { useMySQL, query } from '../db/mysql';
+import { ShiftAssignment, EmployeeDefaultShiftPattern } from '../../src/types';
 
 export class ScheduleResolutionService {
+  private static cachedAssignments: ShiftAssignment[] = [];
+  private static cachedPatterns: EmployeeDefaultShiftPattern[] = [];
+  private static isInitialized = false;
+
+  public static async initCache() {
+    if (!useMySQL()) return;
+    try {
+      const assignRows = await query('SELECT * FROM shift_assignments');
+      this.cachedAssignments = assignRows.map((row: any) => ({
+        id: row.id,
+        userId: row.user_id,
+        date: row.date,
+        shiftCode: row.shift_code,
+        machineId: row.machine_id
+      }));
+
+      const patternRows = await query('SELECT * FROM employee_default_shift_patterns');
+      this.cachedPatterns = patternRows.map((row: any) => ({
+        id: row.id,
+        userId: row.user_id,
+        dayOfWeek: row.day_of_week,
+        shiftCode: row.shift_code
+      }));
+
+      this.isInitialized = true;
+      console.log('[ScheduleResolutionService] Cache initialized with MySQL data.');
+    } catch (err) {
+      console.error('[ScheduleResolutionService] Failed to initialize cache from MySQL:', err);
+    }
+  }
+
+  public static updateAssignmentInCache(asg: ShiftAssignment) {
+    const idx = this.cachedAssignments.findIndex(a => a.id === asg.id);
+    if (idx !== -1) {
+      this.cachedAssignments[idx] = asg;
+    } else {
+      this.cachedAssignments.push(asg);
+    }
+  }
+
+  public static updatePatternInCache(pat: EmployeeDefaultShiftPattern) {
+    const idx = this.cachedPatterns.findIndex(p => p.id === pat.id);
+    if (idx !== -1) {
+      this.cachedPatterns[idx] = pat;
+    } else {
+      this.cachedPatterns.push(pat);
+    }
+  }
+
   /**
    * Resolves the shift code for an employee on a given date using the defined priority:
    * 1. Explicit supervisor-approved assignment (shiftAssignments).
@@ -9,7 +60,7 @@ export class ScheduleResolutionService {
    */
   public static resolveEmployeeShift(employeeId: string, dateStr: string): { shiftCode: 'A' | 'B' | 'C' | 'OFF'; source: string } {
     // 1. Explicit supervisor-approved assignment
-    const assignments = dbInstance.getShiftAssignments();
+    const assignments = useMySQL() ? this.cachedAssignments : dbInstance.getShiftAssignments();
     const directAssign = assignments.find(a => a.userId === employeeId && a.date === dateStr);
     if (directAssign) {
       const result = {
@@ -29,7 +80,7 @@ export class ScheduleResolutionService {
       const d = new Date(year, month - 1, day);
       const dayOfWeek = d.getDay(); // 0: Sun, 1: Mon, etc.
 
-      const defaultPatterns = dbInstance.getEmployeeDefaultShiftPatterns();
+      const defaultPatterns = useMySQL() ? this.cachedPatterns : dbInstance.getEmployeeDefaultShiftPatterns();
       const pattern = defaultPatterns.find(p => p.userId === employeeId && p.dayOfWeek === dayOfWeek);
       if (pattern) {
         const result = {
