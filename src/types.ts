@@ -207,6 +207,34 @@ export interface User {
   createdAt: string;
 }
 
+export interface SwapReviewRequest {
+  id: string;
+  swapRequestId: string;
+  volunteerUserId: string;
+  status: 'PENDING_ADMIN_REVIEW' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'EXPIRED';
+  approvalsRequired: number;
+  approvalsReceived: number;
+  rejectionsReceived: number;
+  createdAt: string;
+  finalizedAt?: string;
+}
+
+export interface SwapReviewAssignment {
+  id: string;
+  reviewRequestId: string;
+  reviewerUserId: string;
+  assignedAt: string;
+}
+
+export interface SwapReviewDecision {
+  id: string;
+  reviewRequestId: string;
+  reviewerUserId: string;
+  decision: 'Approve' | 'Reject' | 'Clarification';
+  comments?: string;
+  decidedAt: string;
+}
+
 // Full DB State container
 export interface DbSchema {
   roles: Role[];
@@ -234,4 +262,7 @@ export interface DbSchema {
   auditLogs: AuditLog[];
   systemSettings: SystemSetting[];
   users: User[];
+  swapReviewRequests?: SwapReviewRequest[];
+  swapReviewAssignments?: SwapReviewAssignment[];
+  swapReviewDecisions?: SwapReviewDecision[];
 }

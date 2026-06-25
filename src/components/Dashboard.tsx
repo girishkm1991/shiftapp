@@ -51,7 +51,8 @@ export default function Dashboard({ user, token, onNavigate, openNotificationDra
         
         // Fetch all swaps and leaves to show pending states
         const resSwaps = await fetch('/api/swaps', { headers });
-        const swaps = await resSwaps.json();
+        const swapsData = await resSwaps.json();
+        const swaps = Array.isArray(swapsData) ? swapsData : [];
         
         const resLeaves = await fetch('/api/leaves', { headers });
         const leaves = await resLeaves.json();

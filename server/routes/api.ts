@@ -6,6 +6,7 @@ import { getCacheService } from '../services/CacheService';
 import { getQueueService } from '../services/QueueService';
 import { SocketService } from '../services/SocketService';
 import { ScheduleResolutionService } from '../services/ScheduleResolutionService';
+import { ReviewWorkflowService } from '../services/ReviewWorkflowService';
 
 
 export const apiRouter = Router();
@@ -719,7 +720,7 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response
     id: volId,
     swapRequestId: swapId,
     volunteerId,
-    status: swap.swapType === 'direct' ? 'selected' : 'pending',
+    status: 'selected',
     createdAt: new Date().toISOString()
   };
 
@@ -727,7 +728,7 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response
     state.swapVolunteers.push(newVol);
 
     const s = state.swapRequests.find(sr => sr.id === swapId);
-    if (s && s.swapType === 'direct') {
+    if (s) {
       s.status = 'volunteer_selected';
       s.targetUserId = volunteerId;
       s.updatedAt = new Date().toISOString();
@@ -776,34 +777,6 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response
       createdAt: new Date().toISOString()
     });
 
-    // Notify requester
-    if (swap.swapType === 'direct') {
-      getNotificationService().sendNotification(
-        swap.requesterId,
-        'Direct Swap Accepted!',
-        `${req.user!.name} accepted your direct shift swap request for ${swap.date}. Pending Supervisor approval.`,
-        'swap',
-        '/swap-marketplace'
-      ).catch(e => console.error(e));
-
-      // Notify Supervisor Sarah Connor
-      getNotificationService().sendNotification(
-        'sup1', // Supervisor Connor
-        'Swap Approval Pending',
-        `${requester?.name || 'Employee'} and ${req.user!.name} request a direct shift swap on ${swap.date}.`,
-        'swap',
-        '/supervisor/approvals'
-      ).catch(e => console.error(e));
-    } else {
-      getNotificationService().sendNotification(
-        swap.requesterId,
-        'New Swap Volunteer',
-        `${req.user!.name} volunteered for your shift swap request on ${swap.date}.`,
-        'swap',
-        '/swap-marketplace'
-      ).catch(e => console.error(e));
-    }
-
     state.auditLogs.push({
       id: uuid(),
       userId: volunteerId,
@@ -812,6 +785,13 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response
       newValue: `swapId: ${swapId}`
     });
   });
+
+  try {
+    // Call the multi-level review workflow service to handle reviewer assignments, status flow, and logs
+    ReviewWorkflowService.createReviewRequest(swapId, volunteerId);
+  } catch (err: any) {
+    console.error('Error in multi-level review setup:', err);
+  }
 
   res.json({ success: true, volunteer: newVol });
 });
@@ -961,6 +941,98 @@ apiRouter.post('/swaps/:id/approve', requireAuth, (req: Request, res: Response) 
   });
 
   res.json({ success: true });
+});
+
+// GET all shift swap review requests
+apiRouter.get('/reviews', requireAuth, (req: Request, res: Response) => {
+  const isReviewer = req.user!.roleId === '2' || req.user!.roleId === '3';
+  const swaps = dbInstance.getSwapRequests();
+  let reviewRequests = dbInstance.getSwapReviewRequests();
+
+  // If the user is not a supervisor or admin, only show reviews where they are involved
+  if (!isReviewer) {
+    reviewRequests = reviewRequests.filter(rev => {
+      const swap = swaps.find(s => s.id === rev.swapRequestId);
+      return (swap && swap.requesterId === req.user!.id) || rev.volunteerUserId === req.user!.id;
+    });
+  }
+
+  const assignments = dbInstance.getSwapReviewAssignments();
+  const decisions = dbInstance.getSwapReviewDecisions();
+  const users = dbInstance.getUsers();
+  const sections = dbInstance.getSections();
+  const machines = dbInstance.getMachines();
+
+  const richReviews = reviewRequests.map(rev => {
+    const swap = swaps.find(s => s.id === rev.swapRequestId);
+    const requester = swap ? users.find(u => u.id === swap.requesterId) : undefined;
+    const volunteer = users.find(u => u.id === rev.volunteerUserId);
+    
+    // Find section and machine of requester
+    const section = requester ? sections.find(s => s.id === requester.sectionId) : undefined;
+    const machine = requester ? machines.find(m => m.id === requester.machineId) : undefined;
+
+    // Filter assignments and decisions for this review
+    const revAssignments = assignments.filter(a => a.reviewRequestId === rev.id);
+    const revDecisions = decisions.filter(d => d.reviewRequestId === rev.id);
+
+    return {
+      ...rev,
+      swap,
+      requester,
+      volunteer,
+      section,
+      machine,
+      assignments: revAssignments.map(asg => {
+        const reviewerUser = users.find(u => u.id === asg.reviewerUserId);
+        return {
+          ...asg,
+          reviewerName: reviewerUser?.name,
+          reviewerClockId: reviewerUser?.clockId,
+          reviewerRoleId: reviewerUser?.roleId
+        };
+      }),
+      decisions: revDecisions.map(dec => {
+        const reviewerUser = users.find(u => u.id === dec.reviewerUserId);
+        return {
+          ...dec,
+          reviewerName: reviewerUser?.name,
+          reviewerClockId: reviewerUser?.clockId,
+          reviewerRoleId: reviewerUser?.roleId
+        };
+      })
+    };
+  });
+
+  res.json(richReviews);
+});
+
+// Submit a review decision (Approve, Reject, Clarification)
+apiRouter.post('/reviews/:id/decision', requireAuth, (req: Request, res: Response) => {
+  const { decision, comments } = req.body;
+  const reviewRequestId = req.params.id;
+  const reviewerUserId = req.user!.id;
+
+  if (req.user!.roleId !== '2' && req.user!.roleId !== '3') {
+    return res.status(403).json({ error: 'Forbidden: Only supervisors and admins can review requests' });
+  }
+
+  if (!['Approve', 'Reject', 'Clarification'].includes(decision)) {
+    return res.status(400).json({ error: 'Invalid decision' });
+  }
+
+  try {
+    const updatedReview = ReviewWorkflowService.submitDecision(
+      reviewRequestId,
+      reviewerUserId,
+      decision,
+      comments
+    );
+    res.json({ success: true, review: updatedReview });
+  } catch (error: any) {
+    console.error('Error submitting review decision:', error);
+    res.status(400).json({ error: error.message });
+  }
 });
 
 // Cancel swap request

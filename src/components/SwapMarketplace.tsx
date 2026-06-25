@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, SwapRequest, Machine } from '../types';
-import { RefreshCw, Check, X, AlertTriangle, HelpCircle, DollarSign, Award, ChevronDown, MessageCircle, ArrowRight, UserCheck } from 'lucide-react';
+import { RefreshCw, Check, X, AlertTriangle, HelpCircle, DollarSign, Award, ChevronDown, MessageCircle, ArrowRight, UserCheck, Clock, Calendar } from 'lucide-react';
 
 interface SwapMarketplaceProps {
   user: User;
@@ -13,6 +13,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
   const [swaps, setSwaps] = useState<any[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // New Swap Request Form State
@@ -52,6 +53,13 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
       if (dataAssets) {
         setMachines(dataAssets.machines || []);
         setEmployees(dataAssets.users?.filter((u: any) => u.id !== user.id && u.roleId === '1') || []);
+      }
+
+      // 3. Fetch reviews
+      const resReviews = await fetch('/api/reviews', { headers });
+      if (resReviews.ok) {
+        const dataReviews = await resReviews.json();
+        if (Array.isArray(dataReviews)) setReviews(dataReviews);
       }
     } catch (e) {
       console.error(e);
@@ -435,6 +443,60 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                               {s.requesterName} is requesting coverage for {s.shiftCode} Shift on {s.date}.
                             </div>
                           )}
+
+                          {/* Multi-Level Review Progress Overlay */}
+                          {(() => {
+                            const matchingReview = reviews.find(r => r.swapRequestId === s.id);
+                            if (!matchingReview) return null;
+
+                            return (
+                              <div className="mb-4 bg-slate-100/70 border border-slate-200/60 p-3.5 rounded-xl text-xxs font-bold text-slate-600">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span>Approval Progress:</span>
+                                  <span className="text-slate-800 font-black">
+                                    {matchingReview.approvalsReceived} of {matchingReview.approvalsRequired} OKs
+                                  </span>
+                                </div>
+                                <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden mb-2.5">
+                                  <div 
+                                    className={`h-full rounded-full transition-all ${
+                                      matchingReview.status === 'APPROVED' ? 'bg-emerald-500' : 
+                                      matchingReview.status === 'REJECTED' ? 'bg-rose-500' : 'bg-orange-500'
+                                    }`}
+                                    style={{ width: `${Math.min(100, (matchingReview.approvalsReceived / matchingReview.approvalsRequired) * 100)}%` }}
+                                  ></div>
+                                </div>
+                                
+                                {matchingReview.rejectionsReceived > 0 && (
+                                  <div className="text-rose-600 text-[10px] font-black mb-2 uppercase tracking-wide">
+                                    ⚠️ {matchingReview.rejectionsReceived} rejection(s) received
+                                  </div>
+                                )}
+
+                                {/* Missing reviews label */}
+                                {(matchingReview.status === 'PENDING_ADMIN_REVIEW' || matchingReview.status === 'UNDER_REVIEW') && (
+                                  <div className="text-orange-600 flex items-center gap-1.5 mt-1 text-[10px] font-black uppercase tracking-wide">
+                                    <Clock className="h-3.5 w-3.5 animate-pulse shrink-0" />
+                                    <span>Awaiting Supervisor / HR Approval</span>
+                                  </div>
+                                )}
+                                
+                                {matchingReview.status === 'APPROVED' && (
+                                  <div className="text-emerald-600 flex items-center gap-1.5 mt-1 text-[10px] font-black uppercase tracking-wide">
+                                    <Check className="h-3.5 w-3.5 shrink-0" />
+                                    <span>Approved & Schedules Swapped</span>
+                                  </div>
+                                )}
+
+                                {matchingReview.status === 'REJECTED' && (
+                                  <div className="text-rose-600 flex items-center gap-1.5 mt-1 text-[10px] font-black uppercase tracking-wide">
+                                    <X className="h-3.5 w-3.5 shrink-0" />
+                                    <span>Rejected by Review Panel</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           {/* Swap core detail */}
                           <div>

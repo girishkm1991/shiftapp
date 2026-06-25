@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { DbSchema, User, Role, Department, Section, Team, Machine, Skill, EmployeeSkill, MachineCertification, EmployeeMachineMapping, EmployeeDefaultShiftPattern, Shift, ShiftAssignment, ShiftTemplate, SwapRequest, SwapVolunteer, LeaveRequest, LeaveBalance, Conversation, ConversationParticipant, Message, Notification, Holiday, AuditLog, SystemSetting } from '../../src/types';
+import { DbSchema, User, Role, Department, Section, Team, Machine, Skill, EmployeeSkill, MachineCertification, EmployeeMachineMapping, EmployeeDefaultShiftPattern, Shift, ShiftAssignment, ShiftTemplate, SwapRequest, SwapVolunteer, LeaveRequest, LeaveBalance, Conversation, ConversationParticipant, Message, Notification, Holiday, AuditLog, SystemSetting, SwapReviewRequest, SwapReviewAssignment, SwapReviewDecision } from '../../src/types';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'imvelo_db.json');
 
@@ -21,17 +21,25 @@ export class Database {
 
   private load(): DbSchema {
     ensureDbDirectory();
+    let loadedState: DbSchema;
     if (fs.existsSync(DB_PATH)) {
       try {
         const content = fs.readFileSync(DB_PATH, 'utf-8');
-        return JSON.parse(content);
+        loadedState = JSON.parse(content);
       } catch (e) {
         console.error('Error reading database file, using empty/seeded schema', e);
+        loadedState = this.getSeededState();
       }
+    } else {
+      loadedState = this.getSeededState();
     }
-    const seeded = this.getSeededState();
-    this.saveState(seeded);
-    return seeded;
+
+    // Ensure new fields exist for backward compatibility
+    if (!loadedState.swapReviewRequests) loadedState.swapReviewRequests = [];
+    if (!loadedState.swapReviewAssignments) loadedState.swapReviewAssignments = [];
+    if (!loadedState.swapReviewDecisions) loadedState.swapReviewDecisions = [];
+
+    return loadedState;
   }
 
   private save() {
@@ -157,7 +165,10 @@ export class Database {
       holidays,
       auditLogs,
       systemSettings,
-      users
+      users,
+      swapReviewRequests: [],
+      swapReviewAssignments: [],
+      swapReviewDecisions: []
     };
   }
 
@@ -187,6 +198,9 @@ export class Database {
   public getHolidays(): Holiday[] { return this.state.holidays; }
   public getAuditLogs(): AuditLog[] { return this.state.auditLogs; }
   public getSystemSettings(): SystemSetting[] { return this.state.systemSettings; }
+  public getSwapReviewRequests(): SwapReviewRequest[] { return this.state.swapReviewRequests || []; }
+  public getSwapReviewAssignments(): SwapReviewAssignment[] { return this.state.swapReviewAssignments || []; }
+  public getSwapReviewDecisions(): SwapReviewDecision[] { return this.state.swapReviewDecisions || []; }
 
   // Generic Save wrapper
   public updateState(updater: (state: DbSchema) => void) {
