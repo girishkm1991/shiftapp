@@ -201,6 +201,28 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
       return;
     }
 
+    // Prepare payload (no undefined values)
+    const payload: any = {
+      date: formDate,
+      shiftCode: formShiftCode,
+      requestedShiftCode: formRequestedShiftCode,
+      swapType: formSwapType.toUpperCase(),
+      remarks: formRemarks || '',
+      incentiveAmount: formIncentive ? parseFloat(formIncentiveAmount) || 0 : 0
+    };
+
+    if (formSwapType === 'direct') {
+      payload.targetEmployeeId = formTargetUser;
+    }
+
+    // Debug Requirements
+    console.log({
+      currentShift: formShiftCode,
+      desiredShift: formRequestedShiftCode,
+      targetEmployeeId: formSwapType === 'direct' ? formTargetUser : undefined,
+      payload
+    });
+
     try {
       const res = await fetch('/api/swaps', {
         method: 'POST',
@@ -208,15 +230,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({
-          date: formDate,
-          shiftCode: formShiftCode,
-          requestedShiftCode: formRequestedShiftCode,
-          swapType: formSwapType,
-          targetEmployeeId: formSwapType === 'direct' ? formTargetUser : undefined,
-          remarks: formRemarks,
-          incentiveAmount: formIncentive ? parseFloat(formIncentiveAmount) || 0 : 0
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -692,8 +706,8 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
 
             <form onSubmit={handleCreateSwap} className="p-6 space-y-5">
               {formError && (
-                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg text-xs text-red-700 font-semibold">
-                  {formError}
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg text-xs text-red-700 font-bold">
+                  ⚠️ {formError}
                 </div>
               )}
 
@@ -705,12 +719,12 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                     required
                     value={formDate}
                     onChange={(e) => setFormDate(e.target.value)}
-                    className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800"
+                    className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-black uppercase text-slate-400">Your Scheduled Shift</label>
+                  <label className="block text-xs font-black uppercase text-slate-400">Your Shift</label>
                   <div className="relative mt-1">
                     <input
                       type="text"
@@ -739,18 +753,21 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               </div>
 
               <div>
-                <label className="block text-xs font-black uppercase text-slate-400">Desired Shift (Shift I Want)</label>
+                <label className="block text-xs font-black uppercase text-slate-400">Desired Shift *</label>
                 <select
                   required
                   value={formRequestedShiftCode}
-                  onChange={(e: any) => setFormRequestedShiftCode(e.target.value)}
+                  onChange={(e: any) => {
+                    setFormRequestedShiftCode(e.target.value);
+                    setFormTargetUser(''); // Reset target employee on shift change
+                  }}
                   className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
                 >
                   <option value="">-- Select Desired Shift --</option>
-                  <option value="A">Morning (A Shift)</option>
-                  <option value="B">Noon (B Shift)</option>
-                  <option value="C">Night (C Shift)</option>
-                  <option value="OFF">Weekly Off (OFF)</option>
+                  <option value="A">A Shift</option>
+                  <option value="B">B Shift</option>
+                  <option value="C">C Shift</option>
+                  <option value="OFF">Weekly OFF</option>
                 </select>
               </div>
 
@@ -805,10 +822,30 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                         const targetEmp = employeesWithShifts.find(emp => emp.id === formTargetUser);
                         if (!targetEmp) return null;
                         return (
-                          <div className="mt-3 bg-orange-50/50 p-4 rounded-2xl border border-orange-100 text-xs text-slate-700 font-bold space-y-1.5 animate-in fade-in duration-200">
-                            <p className="text-[10px] uppercase font-black text-orange-600 tracking-wider">Target Employee Schedule resolved</p>
-                            <div>Employee: <span className="text-slate-900 font-extrabold">{targetEmp.name} ({targetEmp.clockId})</span></div>
-                            <div>Current Scheduled Shift: <span className="text-orange-600 font-black">{targetEmp.shiftCode === 'A' ? 'Morning (A Shift)' : targetEmp.shiftCode === 'B' ? 'Noon (B Shift)' : targetEmp.shiftCode === 'C' ? 'Night (C Shift)' : 'Weekly Off (OFF)'}</span></div>
+                          <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 animate-in fade-in duration-200">
+                            <h5 className="text-xs font-black uppercase text-slate-400 tracking-wider">SELECTED PILOT DETAILS</h5>
+                            
+                            <div className="space-y-2 text-xs">
+                              <div>
+                                <span className="block text-[10px] text-slate-400 uppercase font-black">Name:</span>
+                                <span className="text-sm font-extrabold text-slate-800">{targetEmp.name}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] text-slate-400 uppercase font-black">Clock ID:</span>
+                                <span className="text-sm font-extrabold text-slate-800">{targetEmp.clockId}</span>
+                              </div>
+                              <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                                <div>
+                                  <span className="block text-[10px] text-slate-400 uppercase font-black">SHIFT:</span>
+                                  <span className="text-sm font-black text-orange-600">
+                                    {targetEmp.shiftCode === 'A' ? 'Morning (A Shift)' : targetEmp.shiftCode === 'B' ? 'Noon (B Shift)' : targetEmp.shiftCode === 'C' ? 'Night (C Shift)' : 'Weekly Off (OFF)'}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
+                                  {targetEmp.shiftCode} Shift
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         );
                       })()}
@@ -901,15 +938,13 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               <div className="flex space-x-2 pt-2">
                 <button
                   type="submit"
-                  disabled={formSubmitting || fetchingShift || formShiftCode === '' || formShiftCode === 'OFF'}
+                  disabled={formSubmitting || fetchingShift}
                   className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold py-3.5 rounded-xl transition shadow active:scale-95"
                 >
                   {formSubmitting 
                     ? 'Posting Trade...' 
-                    : (fetchingShift || formShiftCode === '') 
+                    : fetchingShift 
                     ? 'Checking Schedule...' 
-                    : formShiftCode === 'OFF' 
-                    ? 'Cannot Swap on Off Day' 
                     : 'Post Shift Swap Request'}
                 </button>
                 <button

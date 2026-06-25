@@ -540,6 +540,7 @@ apiRouter.get('/swaps', requireAuth, (req: Request, res: Response) => {
 apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
   const { date, shiftCode, swapType, targetUserId, targetEmployeeId, remarks, incentiveOffered, incentiveAmount, requestedShiftCode } = req.body;
   
+  const normalizedSwapType = (swapType || '').toString().toLowerCase();
   const finalTargetUserId = targetUserId || targetEmployeeId;
 
   if (!date || !shiftCode || !swapType || !requestedShiftCode) {
@@ -588,8 +589,8 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
     date,
     shiftCode,
     requestedShiftCode,
-    swapType,
-    targetUserId: swapType === 'direct' ? finalTargetUserId : undefined,
+    swapType: normalizedSwapType,
+    targetUserId: normalizedSwapType === 'direct' ? finalTargetUserId : undefined,
     status: 'pending',
     incentiveOffered: !!incentiveOffered || (incentiveAmount && Number(incentiveAmount) > 0),
     incentiveAmount: incentiveAmount ? Number(incentiveAmount) : 0,
