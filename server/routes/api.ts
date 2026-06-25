@@ -538,8 +538,10 @@ apiRouter.get('/swaps', requireAuth, (req: Request, res: Response) => {
 
 // Create a Swap Request
 apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
-  const { date, shiftCode, swapType, targetUserId, remarks, incentiveOffered, incentiveAmount, requestedShiftCode } = req.body;
+  const { date, shiftCode, swapType, targetUserId, targetEmployeeId, remarks, incentiveOffered, incentiveAmount, requestedShiftCode } = req.body;
   
+  const finalTargetUserId = targetUserId || targetEmployeeId;
+
   if (!date || !shiftCode || !swapType || !requestedShiftCode) {
     return res.status(400).json({ error: 'date, shiftCode, swapType and requestedShiftCode are required' });
   }
@@ -587,10 +589,10 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
     shiftCode,
     requestedShiftCode,
     swapType,
-    targetUserId: swapType === 'direct' ? targetUserId : undefined,
+    targetUserId: swapType === 'direct' ? finalTargetUserId : undefined,
     status: 'pending',
-    incentiveOffered: !!incentiveOffered,
-    incentiveAmount: incentiveOffered ? Number(incentiveAmount) : 0,
+    incentiveOffered: !!incentiveOffered || (incentiveAmount && Number(incentiveAmount) > 0),
+    incentiveAmount: incentiveAmount ? Number(incentiveAmount) : 0,
     remarks,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -630,16 +632,16 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
           ).catch(e => console.error(e));
         }
       });
-    } else if (swapType === 'direct' && targetUserId) {
+    } else if (swapType === 'direct' && finalTargetUserId) {
       // Direct notification
       state.conversationParticipants.push({
         id: uuid(),
         conversationId: convId,
-        userId: targetUserId
+        userId: finalTargetUserId
       });
 
       getNotificationService().sendNotification(
-        targetUserId,
+        finalTargetUserId,
         'Direct Swap Request',
         `${req.user!.name} requested a shift swap with you for ${date} (${shiftCode} Shift).`,
         'swap',
@@ -1406,22 +1408,44 @@ apiRouter.post('/notifications/read-all', requireAuth, (req: Request, res: Respo
 
 // Get dynamic shift for date
 apiRouter.get('/wfm/shift-for-date', requireAuth, (req: Request, res: Response) => {
-  const { date } = req.query;
+  const { date, userId: queryUserId } = req.query;
   if (!date) {
     return res.status(400).json({ error: 'date is required' });
   }
-  const userId = req.user!.id;
+  const userId = (queryUserId as string) || req.user!.id;
   
   // Check if user has ANY default patterns configured
   const defaultPatterns = dbInstance.getEmployeeDefaultShiftPatterns().filter(p => p.userId === userId);
   if (defaultPatterns.length === 0) {
-    console.log(`[shift-for-date] User ${userId} has no weekly pattern configured. Onboarding required.`);
-    return res.json({ shiftCode: null, onboardingRequired: true });
+    console.log(`[shift-for-date] User ${userId} has no weekly pattern configured.`);
   }
 
   const { shiftCode, source } = ScheduleResolutionService.resolveEmployeeShift(userId, date as string);
   ScheduleResolutionService.logResolution('Swap Dialog', userId, date as string, shiftCode, source);
   res.json({ shiftCode, source });
+});
+
+// Get employees with their resolved shift for a given date (for direct swap filtering)
+apiRouter.get('/wfm/employees-shifts', requireAuth, (req: Request, res: Response) => {
+  const { date } = req.query;
+  if (!date) {
+    return res.status(400).json({ error: 'date is required' });
+  }
+
+  const allUsers = dbInstance.getUsers().filter(u => u.roleId === '1' && u.status === 'active');
+  const results = allUsers.map(user => {
+    const { shiftCode } = ScheduleResolutionService.resolveEmployeeShift(user.id, date as string);
+    return {
+      id: user.id,
+      name: user.name,
+      clockId: user.clockId,
+      shiftCode: shiftCode || 'OFF',
+      sectionId: user.sectionId,
+      machineId: user.machineId
+    };
+  });
+
+  res.json(results);
 });
 
 // Employee calendar assignments with dynamic backfills

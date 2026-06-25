@@ -39,6 +39,24 @@ export class Database {
     if (!loadedState.swapReviewAssignments) loadedState.swapReviewAssignments = [];
     if (!loadedState.swapReviewDecisions) loadedState.swapReviewDecisions = [];
 
+    // Guarantee ADMIN001 exists, is active, is admin role, and is unique
+    if (!loadedState.users) loadedState.users = [];
+    const existingAdmin = loadedState.users.find(u => u.clockId && u.clockId.toUpperCase() === 'ADMIN001');
+    if (!existingAdmin) {
+      loadedState.users.push({
+        id: 'admin',
+        clockId: 'ADMIN001',
+        name: 'System Administrator',
+        passwordHash: 'sha256_admin123_placeholder',
+        roleId: '3', // Admin
+        status: 'active', // STATUS: ACTIVE
+        createdAt: new Date().toISOString()
+      });
+    } else {
+      existingAdmin.status = 'active';
+      existingAdmin.roleId = '3';
+    }
+
     return loadedState;
   }
 
@@ -93,7 +111,7 @@ export class Database {
         name: 'System Administrator',
         passwordHash: 'sha256_admin123_placeholder',
         roleId: '3', // Admin
-        status: 'onboarding_step1', // Force first login password change
+        status: 'active', // STATUS: ACTIVE
         createdAt: nowStr
       }
     ];

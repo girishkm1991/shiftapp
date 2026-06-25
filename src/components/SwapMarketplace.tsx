@@ -20,6 +20,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [formDate, setFormDate] = useState(selectedDate || '2026-06-25');
   const [formShiftCode, setFormShiftCode] = useState<'A' | 'B' | 'C' | 'OFF' | ''>('');
+  const [formRequestedShiftCode, setFormRequestedShiftCode] = useState<'A' | 'B' | 'C' | 'OFF' | ''>('');
   const [fetchingShift, setFetchingShift] = useState(false);
   const [formSwapType, setFormSwapType] = useState<'open' | 'direct'>('open');
   const [formTargetUser, setFormTargetUser] = useState('');
@@ -28,6 +29,10 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
   const [formIncentiveAmount, setFormIncentiveAmount] = useState('300');
   const [formError, setFormError] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
+
+  // Employee shift resolution state for Direct Swap filtering
+  const [employeesWithShifts, setEmployeesWithShifts] = useState<any[]>([]);
+  const [loadingShifts, setLoadingShifts] = useState(false);
 
   // Recommendation engine state
   const [recommendations, setRecommendations] = useState<any[]>([]);
@@ -127,6 +132,29 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
     }
   };
 
+  const fetchEmployeesShifts = async (date: string) => {
+    try {
+      setLoadingShifts(true);
+      const res = await fetch(`/api/wfm/employees-shifts?date=${date}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEmployeesWithShifts(data);
+      }
+    } catch (e) {
+      console.error('[SwapMarketplace] Error fetching employees shifts:', e);
+    } finally {
+      setLoadingShifts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showCreateModal && formDate) {
+      fetchEmployeesShifts(formDate);
+    }
+  }, [formDate, showCreateModal]);
+
   useEffect(() => {
     if (showCreateModal && formDate) {
       setFormShiftCode(''); // Instantly clear stale shift code to avoid using it
@@ -146,6 +174,33 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
     setFormError('');
     setFormSubmitting(true);
 
+    // Frontend validations
+    if (!formDate) {
+      setFormError('Date is required');
+      setFormSubmitting(false);
+      return;
+    }
+    if (!formRequestedShiftCode) {
+      setFormError('Desired shift is required.');
+      setFormSubmitting(false);
+      return;
+    }
+    if (formRequestedShiftCode === formShiftCode) {
+      setFormError('Desired shift cannot equal your current shift.');
+      setFormSubmitting(false);
+      return;
+    }
+    if (formShiftCode === 'OFF') {
+      setFormError('Employees on a Weekly Off (OFF) day cannot create swap requests.');
+      setFormSubmitting(false);
+      return;
+    }
+    if (formSwapType === 'direct' && !formTargetUser) {
+      setFormError('Target employee is required for direct swaps.');
+      setFormSubmitting(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/swaps', {
         method: 'POST',
@@ -156,21 +211,24 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
         body: JSON.stringify({
           date: formDate,
           shiftCode: formShiftCode,
+          requestedShiftCode: formRequestedShiftCode,
           swapType: formSwapType,
-          targetUserId: formSwapType === 'direct' ? formTargetUser : undefined,
+          targetEmployeeId: formSwapType === 'direct' ? formTargetUser : undefined,
           remarks: formRemarks,
-          incentiveOffered: formIncentive,
-          incentiveAmount: formIncentiveAmount
+          incentiveAmount: formIncentive ? parseFloat(formIncentiveAmount) || 0 : 0
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
+      alert('Shift request submitted successfully.');
       setShowCreateModal(false);
       fetchSwapsAndAssets();
-      // Reset
+      // Reset form fields
       setFormRemarks('');
       setFormIncentive(false);
+      setFormRequestedShiftCode('');
+      setFormTargetUser('');
     } catch (err: any) {
       setFormError(err.message || 'Swap request creation failed');
     } finally {
@@ -345,7 +403,9 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                             <h5 className="font-extrabold text-slate-800">
                               {s.targetName || s.volunteers.find((v: any) => v.status === 'selected')?.volunteerName || 'General'}
                             </h5>
-                            <span className="text-xs bg-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded">OFF Day</span>
+                            <span className="text-xs bg-emerald-500 text-white font-bold px-1.5 py-0.5 rounded">
+                              {s.requestedShiftCode || 'OFF'} Shift
+                            </span>
                           </div>
                         </div>
 
@@ -513,14 +573,20 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                               </div>
                             )}
                             
-                            <div className="flex items-center space-x-2 mt-2">
-                              <span className="text-xs bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
-                                {s.shiftCode} Shift
-                              </span>
-                              <span className="text-slate-400 font-bold text-xs">for</span>
-                              <span className="text-xs bg-slate-200 text-slate-700 font-extrabold px-2 py-0.5 rounded">
-                                OFF Day / Swap
-                              </span>
+                            <div className="flex items-center space-x-3 mt-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                              <div>
+                                <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Offering</span>
+                                <span className="inline-block text-xs bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
+                                  {s.shiftCode} Shift
+                                </span>
+                              </div>
+                              <ArrowRight className="h-4 w-4 text-slate-400 mt-3" />
+                              <div>
+                                <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Looking For</span>
+                                <span className="inline-block text-xs bg-emerald-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
+                                  {s.requestedShiftCode || 'OFF'} Shift
+                                </span>
+                              </div>
                             </div>
                           </div>
 
@@ -673,6 +739,22 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               </div>
 
               <div>
+                <label className="block text-xs font-black uppercase text-slate-400">Desired Shift (Shift I Want)</label>
+                <select
+                  required
+                  value={formRequestedShiftCode}
+                  onChange={(e: any) => setFormRequestedShiftCode(e.target.value)}
+                  className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
+                >
+                  <option value="">-- Select Desired Shift --</option>
+                  <option value="A">Morning (A Shift)</option>
+                  <option value="B">Noon (B Shift)</option>
+                  <option value="C">Night (C Shift)</option>
+                  <option value="OFF">Weekly Off (OFF)</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-xs font-black uppercase text-slate-400">Swap Type</label>
                 <div className="flex bg-slate-100 p-1 rounded-xl mt-1">
                   <button
@@ -693,18 +775,45 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               </div>
 
               {formSwapType === 'direct' && (
-                <div>
-                  <label className="block text-xs font-black uppercase text-slate-400">Target Employee (Pilot)</label>
-                  <select
-                    value={formTargetUser}
-                    onChange={(e) => setFormTargetUser(e.target.value)}
-                    className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800"
-                  >
-                    <option value="">-- Select Employee --</option>
-                    {employees.map(e => (
-                      <option key={e.id} value={e.id}>{e.name} ({e.clockId})</option>
-                    ))}
-                  </select>
+                <div className="space-y-3">
+                  {!formRequestedShiftCode ? (
+                    <div className="text-xs bg-amber-50 border-l-4 border-amber-500 text-amber-800 p-3.5 rounded-r-xl font-bold">
+                      ⚠️ Please select a Desired Shift above first to find pilots currently scheduled for that shift.
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-black uppercase text-slate-400">
+                        Target Employee (Pilots scheduled for {formRequestedShiftCode === 'A' ? 'A Shift' : formRequestedShiftCode === 'B' ? 'B Shift' : formRequestedShiftCode === 'C' ? 'C Shift' : 'Weekly Off (OFF)'})
+                      </label>
+                      <select
+                        value={formTargetUser}
+                        onChange={(e) => setFormTargetUser(e.target.value)}
+                        className="mt-1 block w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-800 focus:ring-2 focus:ring-orange-500 outline-none"
+                      >
+                        <option value="">-- Select Employee --</option>
+                        {employeesWithShifts
+                          .filter(e => e.id !== user.id && e.shiftCode === formRequestedShiftCode)
+                          .map(e => (
+                            <option key={e.id} value={e.id}>
+                              {e.name} ({e.clockId})
+                            </option>
+                          ))
+                        }
+                      </select>
+
+                      {formTargetUser && (() => {
+                        const targetEmp = employeesWithShifts.find(emp => emp.id === formTargetUser);
+                        if (!targetEmp) return null;
+                        return (
+                          <div className="mt-3 bg-orange-50/50 p-4 rounded-2xl border border-orange-100 text-xs text-slate-700 font-bold space-y-1.5 animate-in fade-in duration-200">
+                            <p className="text-[10px] uppercase font-black text-orange-600 tracking-wider">Target Employee Schedule resolved</p>
+                            <div>Employee: <span className="text-slate-900 font-extrabold">{targetEmp.name} ({targetEmp.clockId})</span></div>
+                            <div>Current Scheduled Shift: <span className="text-orange-600 font-black">{targetEmp.shiftCode === 'A' ? 'Morning (A Shift)' : targetEmp.shiftCode === 'B' ? 'Noon (B Shift)' : targetEmp.shiftCode === 'C' ? 'Night (C Shift)' : 'Weekly Off (OFF)'}</span></div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               )}
 

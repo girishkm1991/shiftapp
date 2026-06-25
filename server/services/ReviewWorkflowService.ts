@@ -107,9 +107,24 @@ export class ReviewWorkflowService {
         throw new Error('You cannot review your own shift swap request');
       }
 
+      // Security Check: Active & Not Deleted reviewer validation
+      const reviewerUser = state.users.find(u => u.id === reviewerUserId);
+      if (!reviewerUser || reviewerUser.status !== 'active' || (reviewerUser as any).deleted) {
+        throw new Error('Inactive or deleted users cannot perform reviews');
+      }
+
       // Ensure review assignments and decisions lists exist
       if (!state.swapReviewDecisions) state.swapReviewDecisions = [];
       if (!state.swapReviewAssignments) state.swapReviewAssignments = [];
+
+      // Security Check: Only assigned reviewers can review
+      const isAssigned = state.swapReviewAssignments.some(asg => 
+        asg.reviewRequestId === reviewRequestId && 
+        asg.reviewerUserId === reviewerUserId
+      );
+      if (!isAssigned) {
+        throw new Error('Only assigned reviewers can review this request');
+      }
 
       // Check if this reviewer already submitted a decision
       const existingDecision = state.swapReviewDecisions.find(d => 
