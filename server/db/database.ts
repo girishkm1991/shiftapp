@@ -1,16 +1,4 @@
-import fs from 'fs';
-import path from 'path';
 import { DbSchema, User, Role, Department, Section, Team, Machine, Skill, EmployeeSkill, MachineCertification, EmployeeMachineMapping, EmployeeDefaultShiftPattern, Shift, ShiftAssignment, ShiftTemplate, SwapRequest, SwapVolunteer, LeaveRequest, LeaveBalance, Conversation, ConversationParticipant, Message, Notification, Holiday, AuditLog, SystemSetting, SwapReviewRequest, SwapReviewAssignment, SwapReviewDecision } from '../../src/types';
-
-const DB_PATH = path.join(process.cwd(), 'data', 'imvelo_db.json');
-
-// Ensure database directory exists
-function ensureDbDirectory() {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
 
 export class Database {
   private state: DbSchema;
@@ -618,19 +606,6 @@ export class Database {
   }
 
   private getSeededState(): DbSchema {
-    try {
-      if (fs.existsSync(DB_PATH)) {
-        const fileContent = fs.readFileSync(DB_PATH, 'utf-8');
-        const parsed = JSON.parse(fileContent);
-        if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.roles)) {
-          console.log('[Database] getSeededState loaded historical data from JSON backup file successfully.');
-          return parsed as DbSchema;
-        }
-      }
-    } catch (e) {
-      console.warn('[Database] Failed to load from historical backup imvelo_db.json, using hardcoded seeds:', e);
-    }
-
     const nowStr = new Date().toISOString();
 
     const roles: Role[] = [

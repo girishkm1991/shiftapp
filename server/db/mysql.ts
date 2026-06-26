@@ -1,13 +1,9 @@
 import mysql from 'mysql2/promise';
-import { createServer } from 'mysql2';
 import { URL } from 'url';
-import alasql from 'alasql';
 
-const dbUrl = process.env.DATABASE_URL || 'mysql://imvelo_user:imvelo_secure_password@localhost:3306/imvelo_shift_db';
+const dbUrl = process.env.DATABASE_URL || 'mysql://imvelo_user:imvelo_secure_password@mysql:3306/imvelo_shift_db';
 
 let pool: mysql.Pool;
-let useLocalAlaSQL = false;
-let mockServer: any = null;
 
 try {
   let config: mysql.PoolOptions;
@@ -36,9 +32,9 @@ try {
 
   pool = mysql.createPool(config);
 } catch (error) {
-  console.error('[MySQL] Failed to parse DATABASE_URL, attempting fallback config:', error);
+  console.error('[MySQL] Failed to parse DATABASE_URL, attempting default config:', error);
   pool = mysql.createPool({
-    host: 'localhost',
+    host: 'mysql',
     user: 'imvelo_user',
     password: 'imvelo_secure_password',
     database: 'imvelo_shift_db',
@@ -49,172 +45,51 @@ try {
   });
 }
 
-let isDbConnected = false;
-
 export function useMySQL(): boolean {
   return true; // Always use MySQL persistence
 }
 
 export { pool };
 
-export async function startMockMySQLServer() {
-  if (mockServer) return;
-
-  const server = createServer((conn: any) => {
-    conn.on('error', (err: any) => {
-      // Ignore connection errors/resets gracefully
-    });
-
-    conn.serverHandshake({
-      protocolVersion: 10,
-      serverVersion: '8.0.32',
-      connectionId: 1,
-      statusFlags: 2,
-      characterSet: 33,
-      authCallback: (params: any, cb: any) => {
-        cb(null);
-      }
-    });
-
-    conn.on('query', (queryText: any) => {
-      conn.writeOk();
-    });
-  });
-
-  return new Promise<void>((resolve, reject) => {
-    (server as any).listen(3306, '127.0.0.1', () => {
-      console.log('[MockMySQL] Local mock MySQL server listening on 127.0.0.1:3306');
-      mockServer = server;
-      useLocalAlaSQL = true;
-      resolve();
-    });
-    (server as any).on('error', (err: any) => {
-      console.error('[MockMySQL] Failed to start local mock MySQL server:', err);
-      reject(err);
-    });
-  });
-}
-
-export function executeAlaSQLQuery<T = any>(sql: string, params?: any[]): T {
-  let clean = sql;
-
-  // Replace backticks with nothing (AlaSQL compatibility)
-  clean = clean.replace(/`/g, '');
-
-  // Strip "ON DUPLICATE KEY UPDATE ..."
-  clean = clean.replace(/ON DUPLICATE KEY UPDATE[\s\S]*$/gi, '');
-
-  // Strip CREATE TABLE constraint clauses that AlaSQL doesn't support
-  clean = clean.replace(/FOREIGN KEY\s*\([^)]*\)\s*REFERENCES\s*\w+\([^)]*\)(\s*ON\s+DELETE\s+[A-Z ]+)?(\s*ON\s+UPDATE\s+[A-Z ]+)?/gi, '');
-  clean = clean.replace(/UNIQUE KEY\s*\w*\s*\([^)]*\)/gi, '');
-  clean = clean.replace(/KEY\s*\w*\s*\([^)]*\)/gi, '');
-  clean = clean.replace(/INDEX\s*\w*\s*\([^)]*\)/gi, '');
-  clean = clean.replace(/UNIQUE INDEX\s*\w*\s*\([^)]*\)/gi, '');
-  clean = clean.replace(/AUTO_INCREMENT/gi, 'AUTOINCREMENT');
-
-  try {
-    const results = alasql(clean, params);
-    // Map standard SHOW TABLES result key to matching MySQL behavior if expected
-    if (clean.toUpperCase().startsWith('SHOW TABLES') && Array.isArray(results)) {
-      return results.map(r => ({ 'Tables_in_imvelo_shift_db': r.tableid })) as any;
-    }
-    return results as T;
-  } catch (err: any) {
-    console.error(`[AlaSQL Error] SQL: ${clean} Params: ${JSON.stringify(params)} Message: ${err.message}`);
-    throw err;
-  }
-}
-
-// Execute query helper
+// Execute query helper using connection pool
 export async function query<T = any>(sql: string, params?: any[]): Promise<T> {
-  const isWrite = /^\s*(insert|update|delete|create|alter|drop|replace)/i.test(sql);
-
-  if (useLocalAlaSQL) {
-    const results = executeAlaSQLQuery<T>(sql, params);
-    if (isWrite) {
-      setTimeout(async () => {
-        try {
-          const { dbInstance } = await import('./database');
-          await dbInstance.loadFromMySQL();
-        } catch (e) {
-          // ignore
-        }
-      }, 0);
-    }
-    return results;
-  } else {
-    const [results] = await pool.execute(sql, params);
-    if (isWrite) {
-      setTimeout(async () => {
-        try {
-          const { dbInstance } = await import('./database');
-          await dbInstance.loadFromMySQL();
-        } catch (e) {
-          // ignore
-        }
-      }, 0);
-    }
-    return results as T;
-  }
+  const [results] = await pool.execute(sql, params);
+  return results as T;
 }
 
 // Transaction execution helper
 export async function transaction<T>(callback: (connection: any) => Promise<T>): Promise<T> {
-  if (useLocalAlaSQL) {
-    const mockConnection = {
-      execute: async (sql: string, params?: any[]) => {
-        const results = executeAlaSQLQuery(sql, params);
-        return [results];
-      },
-      release: () => {}
-    };
-    return await callback(mockConnection as any);
-  } else {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const result = await callback(connection);
-      await connection.commit();
-      return result;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await callback(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
 }
 
-// Auto-create swap review tables if they don't exist
+// Initialize tables, retry indefinitely every 5 seconds if unavailable
 export async function initTables() {
   let connected = false;
-  let attempt = 0;
 
   while (!connected) {
     try {
-      attempt++;
-      // Probe database connectivity
+      console.log('[Database] Waiting for MySQL availability...');
       const connection = await pool.getConnection();
       connection.release();
-      isDbConnected = true;
       connected = true;
-      console.log('[MySQL] Connection pool verified successfully.');
-      console.log('[Database] Using MySQL persistence.');
+      console.log('[Database] Connected successfully.');
+      console.log('[Database] Using Docker MySQL only.');
       console.log('[Database] JSON persistence disabled.');
+      console.log('[Database] Mock persistence disabled.');
     } catch (err) {
-      console.warn(`[Database] MySQL connection failed (Attempt ${attempt}):`, err instanceof Error ? err.message : err);
-      
-      if (attempt >= 1 && !useLocalAlaSQL) {
-        console.warn('[Database] Starting local mock MySQL server and in-memory SQL engine...');
-        try {
-          await startMockMySQLServer();
-        } catch (serverErr) {
-          console.error('[Database] Could not start mock MySQL server:', serverErr);
-        }
-      }
-      
-      console.warn(`[Database] Retrying connection in 2 seconds...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.warn('[Database] Waiting for MySQL availability...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
     }
   }
 
@@ -222,7 +97,7 @@ export async function initTables() {
     const fs = await import('fs');
     const path = await import('path');
 
-    // Check if 'users' table exists, if not initialize from schema.sql
+    // 1. Initialize DB from schema.sql if users table doesn't exist
     try {
       const tables = await query<any[]>("SHOW TABLES");
       const tableNames = tables.map(t => Object.values(t)[0] as string);
@@ -231,7 +106,6 @@ export async function initTables() {
         const schemaPath = path.join(process.cwd(), 'server', 'db', 'schema.sql');
         if (fs.existsSync(schemaPath)) {
           const schemaSql = fs.readFileSync(schemaPath, 'utf-8');
-          // Split by semicolon, filter out empty lines and comments
           const statements = schemaSql
             .split(';')
             .map(s => s.trim())
@@ -240,26 +114,62 @@ export async function initTables() {
             try {
               await query(statement);
             } catch (stmtErr) {
-              // Ignore use database statement error or similar minor ones
+              // Ignore use database or similar minor errors
             }
           }
           console.log('[MySQL] Core tables initialized from schema.sql successfully.');
         }
       }
     } catch (tblErr) {
-      console.error('[MySQL] Failed to check/create tables:', tblErr);
+      console.error('[MySQL] Failed to check/create core tables:', tblErr);
     }
 
-    // Initialize ScheduleResolutionService Cache
+    // 2. Automatic seeding if tables are empty
     try {
-      const { ScheduleResolutionService } = await import('../services/ScheduleResolutionService');
-      await ScheduleResolutionService.initCache();
-    } catch (cacheErr) {
-      console.error('[MySQL] Failed to initialize ScheduleResolutionService Cache:', cacheErr);
+      const usersCountRows = await query<any[]>('SELECT COUNT(*) as count FROM users');
+      const count = usersCountRows[0]?.count || 0;
+      if (count === 0) {
+        console.log('[Database] Database is empty. Seeding roles, departments, sections, machines, and admin user...');
+        
+        // Roles
+        await query("INSERT INTO roles (id, name) VALUES ('1', 'Employee') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO roles (id, name) VALUES ('2', 'Supervisor') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO roles (id, name) VALUES ('3', 'Admin') ON DUPLICATE KEY UPDATE name=name");
+
+        // Departments
+        await query("INSERT INTO departments (id, name) VALUES ('1', 'Production') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO departments (id, name) VALUES ('2', 'Packaging') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO departments (id, name) VALUES ('3', 'Maintenance') ON DUPLICATE KEY UPDATE name=name");
+
+        // Sections
+        await query("INSERT INTO sections (id, name, department_id) VALUES ('1', 'Milling', '1') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO sections (id, name, department_id) VALUES ('2', 'Assembly', '1') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO sections (id, name, department_id) VALUES ('3', 'QA', '2') ON DUPLICATE KEY UPDATE name=name");
+
+        // Machines
+        await query("INSERT INTO machines (id, name, code, section_id) VALUES ('1', 'Milling Mach 1', 'MM01', '1') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO machines (id, name, code, section_id) VALUES ('2', 'Assembly Line 1', 'AL01', '2') ON DUPLICATE KEY UPDATE name=name");
+        await query("INSERT INTO machines (id, name, code, section_id) VALUES ('3', 'QA Station 1', 'QA01', '3') ON DUPLICATE KEY UPDATE name=name");
+
+        // Shifts
+        await query("INSERT INTO shifts (id, name, code, start_time, end_time) VALUES ('1', 'Morning Shift', 'A', '06:00:00', '14:00:00') ON DUPLICATE KEY UPDATE code=code");
+        await query("INSERT INTO shifts (id, name, code, start_time, end_time) VALUES ('2', 'Afternoon Shift', 'B', '14:00:00', '22:00:00') ON DUPLICATE KEY UPDATE code=code");
+        await query("INSERT INTO shifts (id, name, code, start_time, end_time) VALUES ('3', 'Night Shift', 'C', '22:00:00', '06:00:00') ON DUPLICATE KEY UPDATE code=code");
+
+        // Admin user ADMIN001
+        await query(`
+          INSERT INTO users (id, clock_id, name, password_hash, role_id, department_id, section_id, machine_id, status, onboarding_completed_at)
+          VALUES ('ADMIN001', 'ADMIN001', 'Admin', 't33th123!', '3', '1', '1', '1', 'active', CURRENT_TIMESTAMP)
+          ON DUPLICATE KEY UPDATE clock_id=clock_id
+        `);
+
+        console.log('[Database] Seeding completed successfully. Created administrator ADMIN001.');
+      }
+    } catch (seedErr) {
+      console.error('[MySQL] Seeding failed:', seedErr);
     }
 
-    console.log('[MySQL] Ensuring multi-level review tables exist...');
-    
+    // 3. Ensure multi-level review tables exist
     await query(`
       CREATE TABLE IF NOT EXISTS swap_review_requests (
         id VARCHAR(50) PRIMARY KEY,
@@ -311,12 +221,20 @@ export async function initTables() {
 
     console.log('[MySQL] Multi-level review tables checked/created successfully.');
 
-    // Load data from MySQL to populate dbInstance state
+    // 4. Load data from MySQL to populate dbInstance state
     try {
       const { dbInstance } = await import('./database');
       await dbInstance.loadFromMySQL();
     } catch (dbLoadErr) {
       console.error('[MySQL] Failed to load data into dbInstance state:', dbLoadErr);
+    }
+
+    // 5. Initialize ScheduleResolutionService Cache
+    try {
+      const { ScheduleResolutionService } = await import('../services/ScheduleResolutionService');
+      await ScheduleResolutionService.initCache();
+    } catch (cacheErr) {
+      console.error('[MySQL] Failed to initialize ScheduleResolutionService Cache:', cacheErr);
     }
 
   } catch (err) {

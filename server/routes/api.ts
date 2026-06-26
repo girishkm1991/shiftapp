@@ -663,7 +663,7 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
 });
 
 // Volunteer for an open shift
-apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/swaps/:id/volunteer', requireAuth, async (req: Request, res: Response) => {
   const swapId = req.params.id;
   const volunteerId = req.user!.id;
 
@@ -791,7 +791,7 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, (req: Request, res: Response
 
   try {
     // Call the multi-level review workflow service to handle reviewer assignments, status flow, and logs
-    ReviewWorkflowService.createReviewRequest(swapId, volunteerId);
+    await ReviewWorkflowService.createReviewRequest(swapId, volunteerId);
   } catch (err: any) {
     console.error('Error in multi-level review setup:', err);
   }
@@ -1011,7 +1011,7 @@ apiRouter.get('/reviews', requireAuth, (req: Request, res: Response) => {
 });
 
 // Submit a review decision (Approve, Reject, Clarification)
-apiRouter.post('/reviews/:id/decision', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/reviews/:id/decision', requireAuth, async (req: Request, res: Response) => {
   const { decision, comments } = req.body;
   const reviewRequestId = req.params.id;
   const reviewerUserId = req.user!.id;
@@ -1025,7 +1025,7 @@ apiRouter.post('/reviews/:id/decision', requireAuth, (req: Request, res: Respons
   }
 
   try {
-    const updatedReview = ReviewWorkflowService.submitDecision(
+    const updatedReview = await ReviewWorkflowService.submitDecision(
       reviewRequestId,
       reviewerUserId,
       decision,
