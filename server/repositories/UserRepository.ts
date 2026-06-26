@@ -61,7 +61,11 @@ export class UserRepository {
       status: 'status',
       rememberMeToken: 'remember_me_token',
       onboardingCompletedAt: 'onboarding_completed_at',
-      createdAt: 'created_at'
+      createdAt: 'created_at',
+      telegramChatId: 'telegram_chat_id',
+      telegramNotificationsEnabled: 'telegram_notifications_enabled',
+      inAppNotificationsEnabled: 'in_app_notifications_enabled',
+      internalMessagesEnabled: 'internal_messages_enabled'
     };
 
     for (const [key, value] of Object.entries(updates)) {

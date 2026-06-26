@@ -7,7 +7,8 @@ import SwapMarketplace from './components/SwapMarketplace';
 import LeaveManager from './components/LeaveManager';
 import ChatSystem from './components/ChatSystem';
 import SwapReviews from './components/SwapReviews';
-import { Shield, ClipboardList, Calendar, RefreshCw, MessageSquare, Bell, LogOut, X, CheckSquare, Award, ClipboardCheck } from 'lucide-react';
+import ProfileSettings from './components/ProfileSettings';
+import { Shield, ClipboardList, Calendar, RefreshCw, MessageSquare, Bell, LogOut, X, CheckSquare, Award, ClipboardCheck, Settings } from 'lucide-react';
 import { io } from 'socket.io-client';
 
 export default function App() {
@@ -230,6 +231,14 @@ export default function App() {
               </button>
             )}
 
+            <button
+              onClick={() => handleNavigate('settings')}
+              className={`w-full flex items-center space-x-3 px-4 py-3 text-sm font-extrabold rounded-2xl transition-all ${activeTab === 'settings' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/10' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+            >
+              <Settings className="h-5 w-5" />
+              <span>Profile Settings</span>
+            </button>
+
             <div className="pt-4 mt-4 border-t border-slate-100 px-4 text-xs font-bold text-slate-400">
               BUILDERS SECTION • PILOT
             </div>
@@ -287,6 +296,14 @@ export default function App() {
             <SwapReviews
               user={user}
               token={token}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <ProfileSettings
+              user={user}
+              token={token}
+              onUpdateUser={(updatedUser) => setUser(updatedUser)}
             />
           )}
         </main>

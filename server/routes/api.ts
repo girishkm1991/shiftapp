@@ -3,6 +3,7 @@ import { dbInstance } from '../db/database';
 import { User, SwapRequest, SwapVolunteer, LeaveRequest, LeaveBalance, Message, Conversation, Notification, AuditLog } from '../../src/types';
 import { getNotificationService } from '../services/NotificationService';
 import { getCacheService } from '../services/CacheService';
+import { NotificationDispatcherService } from '../services/NotificationDispatcherService';
 import { getQueueService } from '../services/QueueService';
 import { SocketService } from '../services/SocketService';
 import { ScheduleResolutionService } from '../services/ScheduleResolutionService';
@@ -636,13 +637,13 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
       eligibleUsers.forEach(u => {
         const check = checkEligibility(u.id, date, shiftCode);
         if (check.eligible) {
-          getNotificationService().sendNotification(
-            u.id,
-            'New Swap Opportunity',
-            `${req.user!.name} posted an open shift swap for ${date} (${shiftCode} Shift).`,
-            'swap',
-            '/swap-marketplace'
-          ).catch(e => console.error(e));
+          NotificationDispatcherService.dispatch({
+            type: 'OPEN_MARKETPLACE_CREATED',
+            recipients: [u.id],
+            title: 'New Swap Opportunity',
+            message: `New Shift Swap Opportunity\n\nEmployee: ${req.user!.name} (${req.user!.clockId || 'N/A'})\nDate: ${date}\nShift: ${shiftCode}\n\nOpen Imvelo Shift to volunteer.`,
+            link: '/swap-marketplace'
+          }).catch(e => console.error(e));
         }
       });
     } else if (swapType === 'direct' && finalTargetUserId) {
@@ -653,13 +654,13 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
         userId: finalTargetUserId
       });
 
-      getNotificationService().sendNotification(
-        finalTargetUserId,
-        'Direct Swap Request',
-        `${req.user!.name} requested a shift swap with you for ${date} (${shiftCode} Shift).`,
-        'swap',
-        '/swap-marketplace'
-      ).catch(e => console.error(e));
+      NotificationDispatcherService.dispatch({
+        type: 'DIRECT_SWAP_CREATED',
+        recipients: [finalTargetUserId],
+        title: 'Direct Swap Request',
+        message: `Direct Shift Swap Request\n\n${req.user!.name} has requested a direct swap with you.\n\nDate: ${date}\nRequested Shift: ${shiftCode}`,
+        link: '/swap-marketplace'
+      }).catch(e => console.error(e));
     }
 
     state.auditLogs.push({
@@ -840,22 +841,22 @@ apiRouter.post('/swaps/:id/select-volunteer', requireAuth, (req: Request, res: R
     });
 
     // Notify Selected Volunteer
-    getNotificationService().sendNotification(
-      volunteerId,
-      'Volunteer Selected!',
-      `${req.user!.name} selected you for the shift swap on ${swap.date}. Pending Supervisor approval.`,
-      'swap',
-      '/swap-marketplace'
-    ).catch(e => console.error(e));
+    NotificationDispatcherService.dispatch({
+      type: 'VOLUNTEER_SELECTED',
+      recipients: [volunteerId],
+      title: 'Volunteer Selected!',
+      message: `${req.user!.name} selected you for the shift swap on ${swap.date}. Pending Supervisor approval.`,
+      link: '/swap-marketplace'
+    }).catch(e => console.error(e));
 
     // Notify Supervisor Sarah Connor
-    getNotificationService().sendNotification(
-      'sup1', // Supervisor Connor
-      'Swap Approval Pending',
-      `${req.user!.name} and ${state.users.find(u => u.id === volunteerId)?.name} request a shift swap on ${swap.date}.`,
-      'swap',
-      '/supervisor/approvals'
-    ).catch(e => console.error(e));
+    NotificationDispatcherService.dispatch({
+      type: 'SWAP_APPROVAL_PENDING',
+      recipients: ['sup1'],
+      title: 'Swap Approval Pending',
+      message: `${req.user!.name} and ${state.users.find(u => u.id === volunteerId)?.name} request a shift swap on ${swap.date}.`,
+      link: '/supervisor/approvals'
+    }).catch(e => console.error(e));
 
     state.auditLogs.push({
       id: uuid(),
@@ -928,22 +929,22 @@ apiRouter.post('/swaps/:id/approve', requireAuth, (req: Request, res: Response) 
     }
 
     // Send notifications
-    getNotificationService().sendNotification(
-      swap.requesterId,
-      isApproved ? 'Swap Approved' : 'Swap Rejected',
-      `Your swap for ${swap.date} has been ${swap.status} by Supervisor. Comment: ${comment || 'None'}`,
-      'swap',
-      '/swap-marketplace'
-    ).catch(e => console.error(e));
+    NotificationDispatcherService.dispatch({
+      type: isApproved ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
+      recipients: [swap.requesterId],
+      title: isApproved ? 'Swap Approved' : 'Swap Rejected',
+      message: `Your swap for ${swap.date} has been ${swap.status} by Supervisor. Comment: ${comment || 'None'}`,
+      link: '/swap-marketplace'
+    }).catch(e => console.error(e));
 
     if (swap.targetUserId) {
-      getNotificationService().sendNotification(
-        swap.targetUserId,
-        isApproved ? 'Swap Approved' : 'Swap Rejected',
-        `The swap for ${swap.date} has been ${swap.status} by Supervisor. Comment: ${comment || 'None'}`,
-        'swap',
-        '/swap-marketplace'
-      ).catch(e => console.error(e));
+      NotificationDispatcherService.dispatch({
+        type: isApproved ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
+        recipients: [swap.targetUserId],
+        title: isApproved ? 'Swap Approved' : 'Swap Rejected',
+        message: `The swap for ${swap.date} has been ${swap.status} by Supervisor. Comment: ${comment || 'None'}`,
+        link: '/swap-marketplace'
+      }).catch(e => console.error(e));
     }
 
     state.auditLogs.push({
@@ -1144,13 +1145,13 @@ apiRouter.post('/leaves', requireAuth, (req: Request, res: Response) => {
     }
 
     // Notify Supervisor
-    getNotificationService().sendNotification(
-      'sup1', // Connor
-      'New Leave Request',
-      `${req.user!.name} applied for ${leaveType} Leave from ${startDate} to ${endDate}.`,
-      'leave',
-      '/supervisor/approvals'
-    ).catch(e => console.error(e));
+    NotificationDispatcherService.dispatch({
+      type: 'LEAVE_APPLIED',
+      recipients: ['sup1'],
+      title: 'New Leave Request',
+      message: `${req.user!.name} applied for ${leaveType} Leave from ${startDate} to ${endDate}.`,
+      link: '/supervisor/approvals'
+    }).catch(e => console.error(e));
 
     state.auditLogs.push({
       id: uuid(),
@@ -1243,13 +1244,13 @@ apiRouter.post('/leaves/:id/approve', requireAuth, (req: Request, res: Response)
     }
 
     // Send notification
-    getNotificationService().sendNotification(
-      leave.userId,
-      isApproved ? 'Leave Approved' : 'Leave Rejected',
-      `Your leave request for ${leave.startDate} to ${leave.endDate} has been ${leave.status}. Comment: ${comment || 'None'}`,
-      'leave',
-      '/leaves'
-    ).catch(e => console.error(e));
+    NotificationDispatcherService.dispatch({
+      type: 'LEAVE_DECISION',
+      recipients: [leave.userId],
+      title: isApproved ? 'Leave Approved' : 'Leave Rejected',
+      message: `Your leave request for ${leave.startDate} to ${leave.endDate} has been ${leave.status}. Comment: ${comment || 'None'}`,
+      link: '/leaves'
+    }).catch(e => console.error(e));
 
     state.auditLogs.push({
       id: uuid(),
@@ -1278,6 +1279,25 @@ apiRouter.get('/supervisor/leaves', requireAuth, (req: Request, res: Response) =
     };
   });
   res.json(leaves);
+});
+
+
+// Update user notification preferences
+apiRouter.put('/profile/notifications', requireAuth, (req: Request, res: Response) => {
+  const { inAppNotificationsEnabled, internalMessagesEnabled, telegramNotificationsEnabled, telegramChatId } = req.body;
+  
+  dbInstance.updateState(state => {
+    const userObj = state.users.find(u => u.id === req.user!.id);
+    if (userObj) {
+      userObj.inAppNotificationsEnabled = !!inAppNotificationsEnabled;
+      userObj.internalMessagesEnabled = !!internalMessagesEnabled;
+      userObj.telegramNotificationsEnabled = !!telegramNotificationsEnabled;
+      userObj.telegramChatId = telegramChatId || undefined;
+    }
+  });
+
+  const updatedUser = dbInstance.getUsers().find(u => u.id === req.user!.id);
+  res.json({ success: true, user: updatedUser });
 });
 
 
@@ -1315,7 +1335,14 @@ apiRouter.get('/chats', requireAuth, (req: Request, res: Response) => {
 // Get messages for a chat conversation
 apiRouter.get('/chats/:id/messages', requireAuth, (req: Request, res: Response) => {
   const messages = dbInstance.getMessages().filter(m => m.conversationId === req.params.id);
-  res.json(messages);
+  const enriched = messages.map(m => {
+    const u = dbInstance.getUsers().find(user => user.id === m.senderId);
+    return {
+      ...m,
+      senderName: m.senderId === 'system' ? 'System' : (u ? u.name : 'Unknown')
+    };
+  });
+  res.json(enriched);
 });
 
 // Send message to chat
@@ -1349,13 +1376,13 @@ apiRouter.post('/chats/:id/messages', requireAuth, (req: Request, res: Response)
   const otherParticipants = dbInstance.getConversationParticipants().filter(p => p.conversationId === convId && p.userId !== req.user!.id);
   const convTitle = dbInstance.getConversations().find(c => c.id === convId)?.title || 'Chat';
   otherParticipants.forEach(async (p) => {
-    await getNotificationService().sendNotification(
-      p.userId,
-      `New Message in ${convTitle}`,
-      `${req.user!.name}: ${text ? text.substring(0, 50) : 'Sent an attachment'}`,
-      'chat',
-      '/chats'
-    );
+    NotificationDispatcherService.dispatch({
+      type: 'CHAT_MESSAGE',
+      recipients: [p.userId],
+      title: `New Message in ${convTitle}`,
+      message: `${req.user!.name}: ${text ? text.substring(0, 50) : 'Sent an attachment'}`,
+      link: '/chats'
+    }).catch(e => console.error(e));
   });
 
 

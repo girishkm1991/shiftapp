@@ -181,14 +181,16 @@ export default function ChatSystem({ user, token }: ChatSystemProps) {
   };
 
   const getRecipientName = (conv: any) => {
+    if (conv.title === 'System Notifications') return 'System Notifications';
     if (conv.type === 'swap_discussion') return conv.title;
-    const recipient = conv.participants?.find((p: any) => p.id !== user.id);
+    const recipient = conv.participants?.find((p: any) => (p.userId || p.id) !== user.id);
     return recipient ? recipient.name : 'Unknown Employee';
   };
 
   const getRecipientClockId = (conv: any) => {
+    if (conv.title === 'System Notifications') return 'SYSTEM';
     if (conv.type === 'swap_discussion') return 'Trade Discussion';
-    const recipient = conv.participants?.find((p: any) => p.id !== user.id);
+    const recipient = conv.participants?.find((p: any) => (p.userId || p.id) !== user.id);
     return recipient ? recipient.clockId : 'EMP';
   };
 
@@ -324,7 +326,7 @@ export default function ChatSystem({ user, token }: ChatSystemProps) {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
+                disabled={uploading || (activeConv?.title === 'System Notifications')}
                 className="bg-slate-100 hover:bg-slate-200 p-3 rounded-full text-slate-600 transition shrink-0 active:scale-95 disabled:opacity-50"
                 title="Attach Document or Certificate"
               >
@@ -333,16 +335,17 @@ export default function ChatSystem({ user, token }: ChatSystemProps) {
 
               <input
                 type="text"
-                placeholder={uploading ? 'Attaching file...' : 'Type a message...'}
+                placeholder={activeConv?.title === 'System Notifications' ? 'System messages are read-only...' : (uploading ? 'Attaching file...' : 'Type a message...')}
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                disabled={uploading}
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                disabled={uploading || (activeConv?.title === 'System Notifications')}
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-orange-500 focus:border-orange-500 disabled:opacity-60"
               />
 
               <button
                 type="submit"
-                className="bg-orange-600 hover:bg-orange-700 p-3 rounded-full text-white transition shrink-0 shadow shadow-orange-600/20 active:scale-95"
+                disabled={activeConv?.title === 'System Notifications'}
+                className="bg-orange-600 hover:bg-orange-700 p-3 rounded-full text-white transition shrink-0 shadow shadow-orange-600/20 active:scale-95 disabled:opacity-50"
               >
                 <Send className="h-5 w-5" />
               </button>

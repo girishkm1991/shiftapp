@@ -205,6 +205,10 @@ export interface User {
   rememberMeToken?: string;
   onboardingCompletedAt?: string;
   createdAt: string;
+  telegramChatId?: string;
+  telegramNotificationsEnabled?: boolean;
+  inAppNotificationsEnabled?: boolean;
+  internalMessagesEnabled?: boolean;
 }
 
 export interface SwapReviewRequest {

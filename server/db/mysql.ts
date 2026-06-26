@@ -5,31 +5,70 @@ const dbUrl = process.env.DATABASE_URL || 'mysql://imvelo_user:imvelo_secure_pas
 
 let pool: mysql.Pool;
 
-try {
-  let config: mysql.PoolOptions;
-  if (dbUrl.startsWith('mysql://') || dbUrl.startsWith('mysqls://')) {
-    const parsed = new URL(dbUrl);
-    config = {
-      host: parsed.hostname,
-      port: parsed.port ? parseInt(parsed.port, 10) : 3306,
-      user: decodeURIComponent(parsed.username),
-      password: decodeURIComponent(parsed.password),
-      database: decodeURIComponent(parsed.pathname.substring(1)),
-      waitForConnections: true,
-      connectionLimit: 30,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 10000
-    };
-  } else {
-    config = {
-      uri: dbUrl,
+function parseDatabaseUrl(urlStr: string): mysql.PoolOptions {
+  let cleanUrl = urlStr.trim();
+  if (cleanUrl.startsWith('"') && cleanUrl.endsWith('"')) {
+    cleanUrl = cleanUrl.slice(1, -1).trim();
+  }
+  if (cleanUrl.startsWith("'") && cleanUrl.endsWith("'")) {
+    cleanUrl = cleanUrl.slice(1, -1).trim();
+  }
+
+  // If it doesn't start with mysql:// or mysqls://, return as uri directly
+  if (!cleanUrl.startsWith('mysql://') && !cleanUrl.startsWith('mysqls://')) {
+    return {
+      uri: cleanUrl,
       waitForConnections: true,
       connectionLimit: 30,
       queueLimit: 0,
     } as any;
   }
 
+  // Try standard URL parser first
+  try {
+    const parsed = new URL(cleanUrl);
+    return {
+      host: parsed.hostname || 'localhost',
+      port: parsed.port ? parseInt(parsed.port, 10) : 3306,
+      user: parsed.username ? decodeURIComponent(parsed.username) : 'root',
+      password: parsed.password ? decodeURIComponent(parsed.password) : '',
+      database: parsed.pathname ? decodeURIComponent(parsed.pathname.substring(1)) : '',
+      waitForConnections: true,
+      connectionLimit: 30,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000
+    };
+  } catch (urlError) {
+    // Fallback to regex parser if the password contains unencoded special characters like @, :, #, ? etc.
+    const match = cleanUrl.match(/^(?:mysql|mysqls):\/\/([^:]+):([^@]+)@([^:/]+)(?::(\d+))?\/([^?]+)/);
+    if (match) {
+      return {
+        user: decodeURIComponent(match[1]),
+        password: decodeURIComponent(match[2]),
+        host: match[3],
+        port: match[4] ? parseInt(match[4], 10) : 3306,
+        database: decodeURIComponent(match[5]),
+        waitForConnections: true,
+        connectionLimit: 30,
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000
+      };
+    }
+
+    // Ultimate fallback: return as uri
+    return {
+      uri: cleanUrl,
+      waitForConnections: true,
+      connectionLimit: 30,
+      queueLimit: 0,
+    } as any;
+  }
+}
+
+try {
+  const config = parseDatabaseUrl(dbUrl);
   pool = mysql.createPool(config);
 } catch (error) {
   console.error('[MySQL] Failed to parse DATABASE_URL, attempting default config:', error);
@@ -218,6 +257,39 @@ export async function initTables() {
     } catch (columnErr) {
       // Column might already exist, which is fine
     }
+
+    // Ensure users table has telegram and notifications columns
+    try {
+      await query('ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(100) NULL');
+      console.log('[MySQL] Added telegram_chat_id column to users table.');
+    } catch (_) {}
+    try {
+      await query('ALTER TABLE users ADD COLUMN telegram_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE');
+      console.log('[MySQL] Added telegram_notifications_enabled column to users table.');
+    } catch (_) {}
+    try {
+      await query('ALTER TABLE users ADD COLUMN in_app_notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE');
+      console.log('[MySQL] Added in_app_notifications_enabled column to users table.');
+    } catch (_) {}
+    try {
+      await query('ALTER TABLE users ADD COLUMN internal_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE');
+      console.log('[MySQL] Added internal_messages_enabled column to users table.');
+    } catch (_) {}
+
+    // Ensure notification_delivery_logs table is created
+    await query(`
+      CREATE TABLE IF NOT EXISTS notification_delivery_logs (
+        id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        channel VARCHAR(50) NOT NULL,
+        event_type VARCHAR(100) NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        error_message TEXT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[MySQL] Notification preference columns and delivery logs table checked/created successfully.');
 
     console.log('[MySQL] Multi-level review tables checked/created successfully.');
 

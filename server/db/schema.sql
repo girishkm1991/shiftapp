@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS users (
     status VARCHAR(50) NOT NULL DEFAULT 'onboarding_step1',
     remember_me_token VARCHAR(255),
     onboarding_completed_at TIMESTAMP NULL DEFAULT NULL,
+    telegram_chat_id VARCHAR(100) NULL,
+    telegram_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    in_app_notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    internal_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL, -- Soft delete support
     FOREIGN KEY (role_id) REFERENCES roles(id),
@@ -290,4 +294,16 @@ CREATE TABLE IF NOT EXISTS system_settings (
     `key` VARCHAR(100) NOT NULL UNIQUE,
     `value` TEXT NOT NULL,
     description TEXT NULL
+);
+
+-- 26. Notification Delivery Logs
+CREATE TABLE IF NOT EXISTS notification_delivery_logs (
+    id VARCHAR(50) PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL,
+    channel VARCHAR(50) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    error_message TEXT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
