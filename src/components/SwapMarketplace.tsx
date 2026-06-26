@@ -344,9 +344,9 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
   const isSupervisorOrAdmin = user.roleId === '2' || user.roleId === '3';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-hidden">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm gap-4">
         <div>
           <h3 className="text-xl font-black text-slate-900">Shift Swap Marketplace</h3>
           <p className="text-xs text-slate-500 mt-0.5">Browse available trades or request swaps</p>
@@ -405,19 +405,19 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                           <span className="text-xs text-slate-400 font-bold">{s.date}</span>
                         </div>
 
-                        <div className="mt-4 flex items-center justify-between border-b border-slate-200/60 pb-3">
-                          <div>
+                        <div className="mt-4 flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200/60 pb-3 gap-3">
+                          <div className="flex flex-col items-start">
                             <p className="text-xs text-slate-400 font-bold">REQUESTER</p>
                             <h5 className="font-extrabold text-slate-800">{s.requesterName} ({s.requesterClockId})</h5>
-                            <span className="text-xs bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded">{s.shiftCode} Shift</span>
+                            <span className="text-xs bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded mt-0.5">{s.shiftCode} Shift</span>
                           </div>
-                          <ArrowRight className="h-5 w-5 text-slate-400" />
-                          <div className="text-right">
+                          <ArrowRight className="h-5 w-5 text-slate-400 shrink-0 rotate-90 md:rotate-0 self-start md:self-auto" />
+                          <div className="flex flex-col items-start md:items-end text-left md:text-right">
                             <p className="text-xs text-slate-400 font-bold">VOLUNTEER</p>
                             <h5 className="font-extrabold text-slate-800">
                               {s.targetName || s.volunteers.find((v: any) => v.status === 'selected')?.volunteerName || 'General'}
                             </h5>
-                            <span className="text-xs bg-emerald-500 text-white font-bold px-1.5 py-0.5 rounded">
+                            <span className="text-xs bg-emerald-500 text-white font-bold px-1.5 py-0.5 rounded mt-0.5">
                               {s.requestedShiftCode || 'OFF'} Shift
                             </span>
                           </div>
@@ -689,9 +689,9 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
 
       {/* --- CREATE TRADE REQUEST POPUP MODAL --- */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-orange-600 text-white p-5 flex justify-between items-center">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto overflow-x-hidden">
+          <div className="bg-white rounded-3xl w-full max-w-full md:max-w-2xl overflow-hidden shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150 my-auto">
+            <div className="bg-orange-600 text-white p-4 sm:p-5 flex justify-between items-center">
               <div>
                 <h4 className="text-lg font-black">Post Shift Swap Request</h4>
                 <p className="text-xs opacity-90">Set dates and details to look for pilots to swap</p>
@@ -704,14 +704,14 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               </button>
             </div>
 
-            <form onSubmit={handleCreateSwap} className="p-6 space-y-5">
+            <form onSubmit={handleCreateSwap} className="w-full max-w-full px-4 md:px-6 py-4 md:py-6 space-y-4 sm:space-y-5 overflow-y-auto max-h-[calc(100vh-8rem)]">
               {formError && (
                 <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg text-xs text-red-700 font-bold">
                   ⚠️ {formError}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-black uppercase text-slate-400">Shift Date</label>
                   <input
@@ -754,7 +754,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
 
               <div>
                 <label className="block text-xs font-black uppercase text-slate-400">Swap Type</label>
-                <div className="flex bg-slate-100 p-1 rounded-xl mt-1">
+                <div className="flex flex-col sm:flex-row bg-slate-100 p-1 rounded-2xl sm:rounded-xl mt-1 gap-1 sm:gap-0">
                   <button
                     type="button"
                     onClick={() => {
@@ -762,7 +762,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                       setFormRequestedShiftCode('');
                       setFormTargetUser('');
                     }}
-                    className={`flex-1 py-2 text-xs font-extrabold rounded-lg transition ${formSwapType === 'open' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                    className={`w-full sm:flex-1 py-2 text-xs font-extrabold rounded-xl sm:rounded-lg transition ${formSwapType === 'open' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
                   >
                     Open Shift Marketplace
                   </button>
@@ -773,7 +773,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                       setFormRequestedShiftCode('');
                       setFormTargetUser('');
                     }}
-                    className={`flex-1 py-2 text-xs font-extrabold rounded-lg transition ${formSwapType === 'direct' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                    className={`w-full sm:flex-1 py-2 text-xs font-extrabold rounded-xl sm:rounded-lg transition ${formSwapType === 'direct' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
                   >
                     Direct Swap
                   </button>
@@ -841,7 +841,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                       <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 animate-in fade-in duration-200">
                         <h5 className="text-xs font-black uppercase text-slate-400 tracking-wider">SELECTED PILOT DETAILS</h5>
                         
-                        <div className="space-y-2 text-xs font-bold text-slate-700">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-bold text-slate-700">
                           <div>
                             <span className="block text-[10px] text-slate-400 uppercase font-black">Name:</span>
                             <span className="text-sm font-extrabold text-slate-800">{targetEmp.name}</span>
@@ -850,17 +850,17 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                             <span className="block text-[10px] text-slate-400 uppercase font-black">Clock ID:</span>
                             <span className="text-sm font-extrabold text-slate-800">{targetEmp.clockId}</span>
                           </div>
-                          <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
-                            <div>
-                              <span className="block text-[10px] text-slate-400 uppercase font-black">SHIFT FOR THIS DATE:</span>
-                              <span className="text-sm font-black text-orange-600">
-                                {targetEmp.shiftCode === 'A' ? 'Morning (A Shift)' : targetEmp.shiftCode === 'B' ? 'Noon (B Shift)' : targetEmp.shiftCode === 'C' ? 'Night (C Shift)' : 'Weekly Off (OFF)'}
-                              </span>
-                            </div>
-                            <span className="text-[10px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm">
-                              {targetEmp.shiftCode} Shift
+                        </div>
+                        <div className="pt-2 border-t border-slate-200/60 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                          <div>
+                            <span className="block text-[10px] text-slate-400 uppercase font-black">SHIFT FOR THIS DATE:</span>
+                            <span className="text-sm font-black text-orange-600">
+                              {targetEmp.shiftCode === 'A' ? 'Morning (A Shift)' : targetEmp.shiftCode === 'B' ? 'Noon (B Shift)' : targetEmp.shiftCode === 'C' ? 'Night (C Shift)' : 'Weekly Off (OFF)'}
                             </span>
                           </div>
+                          <span className="text-[10px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded shadow-sm self-start md:self-auto">
+                            {targetEmp.shiftCode} Shift
+                          </span>
                         </div>
                       </div>
                     );
@@ -910,7 +910,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
               )}
 
               {/* Incentives */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
                 <div className="flex items-center space-x-2">
                   <input
                     type="checkbox"
@@ -925,7 +925,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                 </div>
 
                 {formIncentive && (
-                  <div className="relative rounded-xl shadow-sm w-full sm:w-40 shrink-0">
+                  <div className="relative rounded-xl shadow-sm w-full md:w-40 shrink-0">
                     <div className="absolute top-3 left-3 text-slate-400 font-bold text-sm">₹</div>
                     <input
                       type="number"
@@ -949,11 +949,11 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                 ></textarea>
               </div>
 
-              <div className="flex space-x-2 pt-2">
+              <div className="flex flex-col md:flex-row gap-2 md:gap-0 md:space-x-2 pt-2">
                 <button
                   type="submit"
                   disabled={formSubmitting || fetchingShift}
-                  className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold py-3.5 rounded-xl transition shadow active:scale-95"
+                  className="w-full md:w-auto md:flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold py-3.5 rounded-xl transition shadow active:scale-95 text-center"
                 >
                   {formSubmitting 
                     ? 'Posting Trade...' 
@@ -964,7 +964,7 @@ export default function SwapMarketplace({ user, token, selectedDate, onOnboardin
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-5 py-3.5 rounded-xl transition"
+                  className="w-full md:w-auto bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-5 py-3.5 rounded-xl transition text-center"
                 >
                   Close
                 </button>
