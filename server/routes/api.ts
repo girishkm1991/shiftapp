@@ -249,7 +249,7 @@ apiRouter.post('/auth/onboard/step2', requireAuth, (req: Request, res: Response)
 });
 
 // Complete onboarding step 3: Setup default shift pattern
-apiRouter.post('/auth/onboard/step3', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/auth/onboard/step3', requireAuth, async (req: Request, res: Response) => {
   const { pattern } = req.body; // Array of 7 shiftCodes: e.g. ['OFF', 'A', 'A', 'A', 'A', 'A', 'OFF']
   if (!pattern || pattern.length !== 7) {
     return res.status(400).json({ error: 'Default pattern of 7 days is required.' });
@@ -290,6 +290,18 @@ apiRouter.post('/auth/onboard/step3', requireAuth, (req: Request, res: Response)
       });
     }
   });
+
+  try {
+    // Explicitly persist the new state to MySQL
+    await dbInstance.saveToMySQL();
+
+    // Reload patterns into the ScheduleResolutionService cache
+    const { ScheduleResolutionService } = await import('../services/ScheduleResolutionService');
+    await ScheduleResolutionService.initCache();
+    console.log('[ScheduleResolutionService] Cache refreshed after onboarding.');
+  } catch (err) {
+    console.error('[Onboarding] Failed to persist and refresh schedule cache:', err);
+  }
 
   const updatedUser = dbInstance.getUsers().find(u => u.id === req.user!.id);
   res.json({ success: true, user: updatedUser });
