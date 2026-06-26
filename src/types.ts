@@ -206,6 +206,7 @@ export interface User {
   onboardingCompletedAt?: string;
   createdAt: string;
   telegramChatId?: string;
+  telegramUsername?: string;
   telegramNotificationsEnabled?: boolean;
   inAppNotificationsEnabled?: boolean;
   internalMessagesEnabled?: boolean;

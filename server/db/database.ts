@@ -21,8 +21,8 @@ export class Database {
   public async upsertUser(u: User) {
     const { query } = await import('./mysql');
     await query(
-      `INSERT INTO users (id, clock_id, name, password_hash, role_id, mobile, email, department_id, section_id, machine_id, status, remember_me_token, onboarding_completed_at, created_at, telegram_chat_id, telegram_notifications_enabled, in_app_notifications_enabled, internal_messages_enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO users (id, clock_id, name, password_hash, role_id, mobile, email, department_id, section_id, machine_id, status, remember_me_token, onboarding_completed_at, created_at, telegram_chat_id, telegram_username, telegram_notifications_enabled, in_app_notifications_enabled, internal_messages_enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE 
          clock_id = VALUES(clock_id), name = VALUES(name), password_hash = VALUES(password_hash),
          role_id = VALUES(role_id), mobile = VALUES(mobile), email = VALUES(email),
@@ -30,6 +30,7 @@ export class Database {
          status = VALUES(status), remember_me_token = VALUES(remember_me_token),
          onboarding_completed_at = VALUES(onboarding_completed_at),
          telegram_chat_id = VALUES(telegram_chat_id),
+         telegram_username = VALUES(telegram_username),
          telegram_notifications_enabled = VALUES(telegram_notifications_enabled),
          in_app_notifications_enabled = VALUES(in_app_notifications_enabled),
          internal_messages_enabled = VALUES(internal_messages_enabled)`,
@@ -49,6 +50,7 @@ export class Database {
         u.onboardingCompletedAt ? new Date(u.onboardingCompletedAt) : null,
         u.createdAt ? new Date(u.createdAt) : new Date(),
         u.telegramChatId || null,
+        u.telegramUsername || null,
         u.telegramNotificationsEnabled ? 1 : 0,
         u.inAppNotificationsEnabled !== false ? 1 : 0, // default true
         u.internalMessagesEnabled !== false ? 1 : 0 // default true
@@ -298,6 +300,7 @@ export class Database {
         onboardingCompletedAt: u.onboarding_completed_at ? new Date(u.onboarding_completed_at).toISOString() : undefined,
         createdAt: u.created_at ? new Date(u.created_at).toISOString() : undefined,
         telegramChatId: u.telegram_chat_id || undefined,
+        telegramUsername: u.telegram_username || undefined,
         telegramNotificationsEnabled: u.telegram_notifications_enabled === 1,
         inAppNotificationsEnabled: u.in_app_notifications_enabled !== 0, // default true
         internalMessagesEnabled: u.internal_messages_enabled !== 0 // default true

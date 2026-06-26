@@ -71,4 +71,14 @@ export class SocketService {
       console.warn('[SocketService] Cannot broadcast notification, socket.io not initialized.');
     }
   }
+
+  // Broadcast a generic custom event to a specific user room
+  public static broadcastToUser(userId: string, event: string, data: any) {
+    if (this.io) {
+      this.io.to(`user_${userId}`).emit(event, data);
+      console.log(`[SocketService] Broadcast event "${event}" to user_${userId}`);
+    } else {
+      console.warn('[SocketService] Cannot broadcast event, socket.io not initialized.');
+    }
+  }
 }

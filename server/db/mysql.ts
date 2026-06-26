@@ -275,6 +275,10 @@ export async function initTables() {
       await query('ALTER TABLE users ADD COLUMN internal_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE');
       console.log('[MySQL] Added internal_messages_enabled column to users table.');
     } catch (_) {}
+    try {
+      await query('ALTER TABLE users ADD COLUMN telegram_username VARCHAR(100) NULL');
+      console.log('[MySQL] Added telegram_username column to users table.');
+    } catch (_) {}
 
     // Ensure notification_delivery_logs table is created
     await query(`
@@ -289,7 +293,33 @@ export async function initTables() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
-    console.log('[MySQL] Notification preference columns and delivery logs table checked/created successfully.');
+
+    // Ensure telegram_link_requests table is created
+    await query(`
+      CREATE TABLE IF NOT EXISTS telegram_link_requests (
+        id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        link_code VARCHAR(100) NOT NULL UNIQUE,
+        expires_at TIMESTAMP NOT NULL,
+        used BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Ensure telegram_link_audit table is created
+    await query(`
+      CREATE TABLE IF NOT EXISTS telegram_link_audit (
+        id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        telegram_chat_id VARCHAR(100) NOT NULL,
+        action ENUM('LINK', 'UNLINK') NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log('[MySQL] Notification preference columns, delivery logs, telegram link requests, and audit tables checked/created successfully.');
 
     console.log('[MySQL] Multi-level review tables checked/created successfully.');
 
@@ -307,6 +337,14 @@ export async function initTables() {
       await ScheduleResolutionService.initCache();
     } catch (cacheErr) {
       console.error('[MySQL] Failed to initialize ScheduleResolutionService Cache:', cacheErr);
+    }
+
+    // 6. Start Telegram Bot Polling
+    try {
+      const { TelegramNotificationService } = await import('../services/TelegramNotificationService');
+      TelegramNotificationService.startPolling();
+    } catch (tgErr) {
+      console.error('[MySQL] Failed to start Telegram Bot polling:', tgErr);
     }
 
   } catch (err) {

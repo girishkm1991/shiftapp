@@ -1301,6 +1301,95 @@ apiRouter.put('/profile/notifications', requireAuth, (req: Request, res: Respons
 });
 
 
+// Generate a secure, single-use Telegram linking code
+apiRouter.post('/profile/telegram/generate-link', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+
+  try {
+    const { query } = await import('../db/mysql');
+
+    // 1. Revoke previous unused link codes
+    await query(
+      'UPDATE telegram_link_requests SET used = TRUE WHERE user_id = ? AND used = FALSE',
+      [userId]
+    );
+
+    // 2. Generate secure one-time code: LINK-309715-ABC123
+    const randomDigits = Math.floor(100000 + Math.random() * 900000); // 6 digits
+    const randomChars = Array.from({ length: 6 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 36)]).join('');
+    const linkCode = `LINK-${randomDigits}-${randomChars}`;
+
+    const id = uuid();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+
+    // 3. Store in the database
+    await query(
+      'INSERT INTO telegram_link_requests (id, user_id, link_code, expires_at, used) VALUES (?, ?, ?, ?, ?)',
+      [id, userId, linkCode, expiresAt, false]
+    );
+
+    res.json({
+      linkCode,
+      expiresAt: expiresAt.toISOString()
+    });
+  } catch (err: any) {
+    console.error('[API] Error generating telegram link code:', err);
+    res.status(500).json({ error: 'Failed to generate secure linking code.' });
+  }
+});
+
+
+// Unlink a Telegram account securely
+apiRouter.delete('/profile/telegram/unlink', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const userChatId = req.user!.telegramChatId;
+
+  try {
+    const { query } = await import('../db/mysql');
+
+    // 1. Audit log
+    if (userChatId) {
+      await query(
+        'INSERT INTO telegram_link_audit (id, user_id, telegram_chat_id, action) VALUES (?, ?, ?, ?)',
+        [uuid(), userId, userChatId, 'UNLINK']
+      );
+    }
+
+    // 2. Update users table
+    await query(
+      'UPDATE users SET telegram_chat_id = NULL, telegram_username = NULL, telegram_notifications_enabled = FALSE WHERE id = ?',
+      [userId]
+    );
+
+    // 3. Update memory state
+    dbInstance.updateState(state => {
+      const u = state.users.find(user => user.id === userId);
+      if (u) {
+        u.telegramChatId = undefined;
+        u.telegramUsername = undefined;
+        u.telegramNotificationsEnabled = false;
+      }
+
+      // Add to standard system audit log so admins can see it immediately on dashboard
+      state.auditLogs.push({
+        id: uuid(),
+        userId: userId,
+        action: 'TELEGRAM_UNLINK',
+        oldValue: userChatId || null,
+        newValue: null,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    const updatedUser = dbInstance.getUsers().find(u => u.id === userId);
+    res.json({ success: true, user: updatedUser });
+  } catch (err: any) {
+    console.error('[API] Error unlinking telegram account:', err);
+    res.status(500).json({ error: 'Failed to unlink Telegram account.' });
+  }
+});
+
+
 // --- MODULE 5: CHAT SYSTEM ---
 
 // Get active conversations

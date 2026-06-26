@@ -18,6 +18,7 @@ export class Mapper {
       onboardingCompletedAt: row.onboarding_completed_at ? new Date(row.onboarding_completed_at).toISOString() : undefined,
       createdAt: new Date(row.created_at).toISOString(),
       telegramChatId: row.telegram_chat_id || undefined,
+      telegramUsername: row.telegram_username || undefined,
       telegramNotificationsEnabled: row.telegram_notifications_enabled === 1,
       inAppNotificationsEnabled: row.in_app_notifications_enabled !== 0,
       internalMessagesEnabled: row.internal_messages_enabled !== 0

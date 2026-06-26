@@ -52,6 +52,22 @@ export default function App() {
         });
       });
 
+      // Listen for instant Telegram linking update
+      socket.on('telegram_linked', (telegramData: any) => {
+        console.log('[Socket] Telegram linking update received:', telegramData);
+        setUser(prev => {
+          if (!prev) return prev;
+          const updated = {
+            ...prev,
+            telegramChatId: telegramData.telegramChatId,
+            telegramUsername: telegramData.telegramUsername,
+            telegramNotificationsEnabled: telegramData.telegramNotificationsEnabled
+          };
+          localStorage.setItem('imvelo_user', JSON.stringify(updated));
+          return updated;
+        });
+      });
+
       return () => {
         socket.disconnect();
       };

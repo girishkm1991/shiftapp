@@ -63,6 +63,7 @@ export class UserRepository {
       onboardingCompletedAt: 'onboarding_completed_at',
       createdAt: 'created_at',
       telegramChatId: 'telegram_chat_id',
+      telegramUsername: 'telegram_username',
       telegramNotificationsEnabled: 'telegram_notifications_enabled',
       inAppNotificationsEnabled: 'in_app_notifications_enabled',
       internalMessagesEnabled: 'internal_messages_enabled'
