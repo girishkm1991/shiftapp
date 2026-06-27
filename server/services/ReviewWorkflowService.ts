@@ -50,13 +50,13 @@ export class ReviewWorkflowService {
       await ReviewRepository.saveSwapReviewAssignment(assignment);
 
       // Notify reviewer
-      NotificationDispatcherService.dispatch({
+      await NotificationDispatcherService.dispatch({
         type: 'REVIEW_ASSIGNED',
         recipients: [reviewer.id],
         title: 'New Swap Review Assigned',
         message: `You have been assigned to review a shift swap request for ${swap.date}.`,
         link: '/swap-marketplace'
-      }).catch(e => console.error(e));
+      });
     }
 
     // Update swap status to indicate it is now undergoing multi-level review
@@ -75,13 +75,13 @@ export class ReviewWorkflowService {
     });
 
     // Notify original requester
-    NotificationDispatcherService.dispatch({
+    await NotificationDispatcherService.dispatch({
       type: 'VOLUNTEER_JOINED',
       recipients: [swap.requesterId],
       title: 'Volunteer Registered',
       message: `An employee has volunteered for your shift swap on ${swap.date}. It is now under supervisor review.`,
       link: '/swap-marketplace'
-    }).catch(e => console.error(e));
+    });
 
     return newRequest;
   }
@@ -191,21 +191,21 @@ export class ReviewWorkflowService {
       await SwapRepository.saveSwapRequest(swap);
 
       // 1. Notify Original Employee & Volunteer
-      NotificationDispatcherService.dispatch({
+      await NotificationDispatcherService.dispatch({
         type: finalStatus === 'APPROVED' ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
         recipients: [swap.requesterId],
         title: `Shift Swap ${finalStatus}`,
         message: `Your shift swap request for ${swap.date} has been ${finalStatus.toLowerCase()}.`,
         link: '/swap-marketplace'
-      }).catch(e => console.error(e));
+      });
 
-      NotificationDispatcherService.dispatch({
+      await NotificationDispatcherService.dispatch({
         type: finalStatus === 'APPROVED' ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
         recipients: [reviewReq.volunteerUserId],
         title: `Shift Swap ${finalStatus}`,
         message: `The shift swap request for ${swap.date} you volunteered for has been ${finalStatus.toLowerCase()}.`,
         link: '/swap-marketplace'
-      }).catch(e => console.error(e));
+      });
 
       // 2. Schedule update if APPROVED
       if (finalStatus === 'APPROVED') {
@@ -260,27 +260,27 @@ export class ReviewWorkflowService {
       }
 
       // Notify all assigned reviewers about finalization
-      assignments.forEach(asg => {
-        NotificationDispatcherService.dispatch({
+      for (const asg of assignments) {
+        await NotificationDispatcherService.dispatch({
           type: finalStatus === 'APPROVED' ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
           recipients: [asg.reviewerUserId],
           title: `Swap Request Finalized`,
           message: `The swap request for ${swap.date} has been finalized as ${finalStatus!.toLowerCase()}.`,
           link: '/swap-marketplace'
-        }).catch(e => console.error(e));
-      });
+        });
+      }
     } else {
       // Just save the updated reviewReq (counters changed)
       await ReviewRepository.saveSwapReviewRequest(reviewReq);
 
       // If not finalized but decision is Approve/Reject/Clarification, notify requester
-      NotificationDispatcherService.dispatch({
+      await NotificationDispatcherService.dispatch({
         type: `REVIEW_DECISION_${decision.toUpperCase()}`,
         recipients: [swap.requesterId],
         title: `Review Action: ${decision}`,
         message: `A reviewer has submitted a decision: ${decision} for your swap on ${swap.date}. Progress: ${reviewReq.approvalsReceived} of ${minApprovals} approvals received.`,
         link: '/swap-marketplace'
-      }).catch(e => console.error(e));
+      });
     }
 
     return reviewReq;

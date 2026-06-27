@@ -550,7 +550,7 @@ apiRouter.get('/swaps', requireAuth, (req: Request, res: Response) => {
 });
 
 // Create a Swap Request
-apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/swaps', requireAuth, async (req: Request, res: Response) => {
   const { date, shiftCode, swapType, targetUserId, targetEmployeeId, remarks, incentiveOffered, incentiveAmount, requestedShiftCode } = req.body;
   
   const normalizedSwapType = (swapType || '').toString().toLowerCase();
@@ -612,11 +612,11 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
     updatedAt: new Date().toISOString()
   };
 
+  const convId = 'c_swap_' + uuid();
   dbInstance.updateState(state => {
     state.swapRequests.push(newSwap);
 
     // Auto-create swap chat discussion thread
-    const convId = 'c_swap_' + uuid();
     state.conversations.push({
       id: convId,
       type: 'swap',
@@ -631,36 +631,13 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
       userId: requesterId
     });
 
-    // Notify eligible employees if open shift
-    if (swapType === 'open') {
-      const eligibleUsers = state.users.filter(u => u.id !== requesterId && u.roleId === '1');
-      eligibleUsers.forEach(u => {
-        const check = checkEligibility(u.id, date, shiftCode);
-        if (check.eligible) {
-          NotificationDispatcherService.dispatch({
-            type: 'OPEN_MARKETPLACE_CREATED',
-            recipients: [u.id],
-            title: 'New Swap Opportunity',
-            message: `New Shift Swap Opportunity\n\nEmployee: ${req.user!.name} (${req.user!.clockId || 'N/A'})\nDate: ${date}\nShift: ${shiftCode}\n\nOpen Imvelo Shift to volunteer.`,
-            link: '/swap-marketplace'
-          }).catch(e => console.error(e));
-        }
-      });
-    } else if (swapType === 'direct' && finalTargetUserId) {
-      // Direct notification
+    if (swapType === 'direct' && finalTargetUserId) {
+      // Direct notification participant addition
       state.conversationParticipants.push({
         id: uuid(),
         conversationId: convId,
         userId: finalTargetUserId
       });
-
-      NotificationDispatcherService.dispatch({
-        type: 'DIRECT_SWAP_CREATED',
-        recipients: [finalTargetUserId],
-        title: 'Direct Swap Request',
-        message: `Direct Shift Swap Request\n\n${req.user!.name} has requested a direct swap with you.\n\nDate: ${date}\nRequested Shift: ${shiftCode}`,
-        link: '/swap-marketplace'
-      }).catch(e => console.error(e));
     }
 
     state.auditLogs.push({
@@ -671,6 +648,31 @@ apiRouter.post('/swaps', requireAuth, (req: Request, res: Response) => {
       newValue: JSON.stringify(newSwap)
     });
   });
+
+  // Notify eligible employees if open shift - done asynchronously but fully awaited outside the state update
+  if (swapType === 'open') {
+    const eligibleUsers = dbInstance.getUsers().filter(u => u.id !== requesterId && u.roleId === '1');
+    for (const u of eligibleUsers) {
+      const check = checkEligibility(u.id, date, shiftCode);
+      if (check.eligible) {
+        await NotificationDispatcherService.dispatch({
+          type: 'OPEN_MARKETPLACE_CREATED',
+          recipients: [u.id],
+          title: 'New Swap Opportunity',
+          message: `New Shift Swap Opportunity\n\nEmployee: ${req.user!.name} (${req.user!.clockId || 'N/A'})\nDate: ${date}\nShift: ${shiftCode}\n\nOpen Imvelo Shift to volunteer.`,
+          link: '/swap-marketplace'
+        });
+      }
+    }
+  } else if (swapType === 'direct' && finalTargetUserId) {
+    await NotificationDispatcherService.dispatch({
+      type: 'DIRECT_SWAP_CREATED',
+      recipients: [finalTargetUserId],
+      title: 'Direct Swap Request',
+      message: `Direct Shift Swap Request\n\n${req.user!.name} has requested a direct swap with you.\n\nDate: ${date}\nRequested Shift: ${shiftCode}`,
+      link: '/swap-marketplace'
+    });
+  }
 
   res.json({ success: true, swap: newSwap });
 });
@@ -813,13 +815,16 @@ apiRouter.post('/swaps/:id/volunteer', requireAuth, async (req: Request, res: Re
 });
 
 // Select a volunteer (by Original Employee)
-apiRouter.post('/swaps/:id/select-volunteer', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/swaps/:id/select-volunteer', requireAuth, async (req: Request, res: Response) => {
   const swapId = req.params.id;
   const { volunteerId } = req.body;
 
   if (!volunteerId) {
     return res.status(400).json({ error: 'volunteerId is required' });
   }
+
+  let swapDate = '';
+  let volunteerName = 'Unknown';
 
   dbInstance.updateState(state => {
     const swap = state.swapRequests.find(s => s.id === swapId);
@@ -829,6 +834,7 @@ apiRouter.post('/swaps/:id/select-volunteer', requireAuth, (req: Request, res: R
       return;
     }
 
+    swapDate = swap.date;
     swap.status = 'volunteer_selected';
     swap.targetUserId = volunteerId;
     swap.updatedAt = new Date().toISOString();
@@ -840,23 +846,10 @@ apiRouter.post('/swaps/:id/select-volunteer', requireAuth, (req: Request, res: R
       }
     });
 
-    // Notify Selected Volunteer
-    NotificationDispatcherService.dispatch({
-      type: 'VOLUNTEER_SELECTED',
-      recipients: [volunteerId],
-      title: 'Volunteer Selected!',
-      message: `${req.user!.name} selected you for the shift swap on ${swap.date}. Pending Supervisor approval.`,
-      link: '/swap-marketplace'
-    }).catch(e => console.error(e));
-
-    // Notify Supervisor Sarah Connor
-    NotificationDispatcherService.dispatch({
-      type: 'SWAP_APPROVAL_PENDING',
-      recipients: ['sup1'],
-      title: 'Swap Approval Pending',
-      message: `${req.user!.name} and ${state.users.find(u => u.id === volunteerId)?.name} request a shift swap on ${swap.date}.`,
-      link: '/supervisor/approvals'
-    }).catch(e => console.error(e));
+    const volUser = state.users.find(u => u.id === volunteerId);
+    if (volUser) {
+      volunteerName = volUser.name;
+    }
 
     state.auditLogs.push({
       id: uuid(),
@@ -867,17 +860,42 @@ apiRouter.post('/swaps/:id/select-volunteer', requireAuth, (req: Request, res: R
     });
   });
 
+  if (swapDate) {
+    // Notify Selected Volunteer
+    await NotificationDispatcherService.dispatch({
+      type: 'VOLUNTEER_SELECTED',
+      recipients: [volunteerId],
+      title: 'Volunteer Selected!',
+      message: `${req.user!.name} selected you for the shift swap on ${swapDate}. Pending Supervisor approval.`,
+      link: '/swap-marketplace'
+    });
+
+    // Notify Supervisor Sarah Connor
+    await NotificationDispatcherService.dispatch({
+      type: 'SWAP_APPROVAL_PENDING',
+      recipients: ['sup1'],
+      title: 'Swap Approval Pending',
+      message: `${req.user!.name} and ${volunteerName} request a shift swap on ${swapDate}.`,
+      link: '/supervisor/approvals'
+    });
+  }
+
   res.json({ success: true });
 });
 
 // Approve/Reject Swap (by Supervisor)
-apiRouter.post('/swaps/:id/approve', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/swaps/:id/approve', requireAuth, async (req: Request, res: Response) => {
   const swapId = req.params.id;
   const { approve, comment } = req.body; // boolean approve, string comment
 
   if (req.user!.roleId !== '2' && req.user!.roleId !== '3') {
     return res.status(403).json({ error: 'Forbidden: Only supervisors can approve swaps' });
   }
+
+  let swapRequesterId = '';
+  let swapTargetUserId = '';
+  let swapDate = '';
+  let swapStatus = '';
 
   dbInstance.updateState(state => {
     const swap = state.swapRequests.find(s => s.id === swapId);
@@ -888,6 +906,11 @@ apiRouter.post('/swaps/:id/approve', requireAuth, (req: Request, res: Response) 
     swap.supervisorComment = comment;
     swap.supervisorId = req.user!.id;
     swap.updatedAt = new Date().toISOString();
+
+    swapRequesterId = swap.requesterId;
+    swapTargetUserId = swap.targetUserId || '';
+    swapDate = swap.date;
+    swapStatus = swap.status;
 
     const requester = state.users.find(u => u.id === swap.requesterId);
     const volunteer = state.users.find(u => u.id === swap.targetUserId);
@@ -928,25 +951,6 @@ apiRouter.post('/swaps/:id/approve', requireAuth, (req: Request, res: Response) 
       }
     }
 
-    // Send notifications
-    NotificationDispatcherService.dispatch({
-      type: isApproved ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
-      recipients: [swap.requesterId],
-      title: isApproved ? 'Swap Approved' : 'Swap Rejected',
-      message: `Your swap for ${swap.date} has been ${swap.status} by Supervisor. Comment: ${comment || 'None'}`,
-      link: '/swap-marketplace'
-    }).catch(e => console.error(e));
-
-    if (swap.targetUserId) {
-      NotificationDispatcherService.dispatch({
-        type: isApproved ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
-        recipients: [swap.targetUserId],
-        title: isApproved ? 'Swap Approved' : 'Swap Rejected',
-        message: `The swap for ${swap.date} has been ${swap.status} by Supervisor. Comment: ${comment || 'None'}`,
-        link: '/swap-marketplace'
-      }).catch(e => console.error(e));
-    }
-
     state.auditLogs.push({
       id: uuid(),
       userId: req.user!.id,
@@ -955,6 +959,28 @@ apiRouter.post('/swaps/:id/approve', requireAuth, (req: Request, res: Response) 
       newValue: `swapId: ${swapId}, comment: ${comment}`
     });
   });
+
+  if (swapRequesterId) {
+    const isApproved = swapStatus === 'approved';
+    // Send notifications
+    await NotificationDispatcherService.dispatch({
+      type: isApproved ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
+      recipients: [swapRequesterId],
+      title: isApproved ? 'Swap Approved' : 'Swap Rejected',
+      message: `Your swap for ${swapDate} has been ${swapStatus} by Supervisor. Comment: ${comment || 'None'}`,
+      link: '/swap-marketplace'
+    });
+
+    if (swapTargetUserId) {
+      await NotificationDispatcherService.dispatch({
+        type: isApproved ? 'SWAP_APPROVED' : 'SWAP_REJECTED',
+        recipients: [swapTargetUserId],
+        title: isApproved ? 'Swap Approved' : 'Swap Rejected',
+        message: `The swap for ${swapDate} has been ${swapStatus} by Supervisor. Comment: ${comment || 'None'}`,
+        link: '/swap-marketplace'
+      });
+    }
+  }
 
   res.json({ success: true });
 });
@@ -1085,7 +1111,7 @@ apiRouter.get('/leaves', requireAuth, (req: Request, res: Response) => {
 });
 
 // Create a Leave Request
-apiRouter.post('/leaves', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/leaves', requireAuth, async (req: Request, res: Response) => {
   const { startDate, endDate, leaveType, remarks } = req.body;
 
   if (!startDate || !endDate || !leaveType) {
@@ -1144,15 +1170,6 @@ apiRouter.post('/leaves', requireAuth, (req: Request, res: Response) => {
       userBalance.pending += diffDays;
     }
 
-    // Notify Supervisor
-    NotificationDispatcherService.dispatch({
-      type: 'LEAVE_APPLIED',
-      recipients: ['sup1'],
-      title: 'New Leave Request',
-      message: `${req.user!.name} applied for ${leaveType} Leave from ${startDate} to ${endDate}.`,
-      link: '/supervisor/approvals'
-    }).catch(e => console.error(e));
-
     state.auditLogs.push({
       id: uuid(),
       userId: req.user!.id,
@@ -1160,6 +1177,15 @@ apiRouter.post('/leaves', requireAuth, (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
       newValue: JSON.stringify(newLeave)
     });
+  });
+
+  // Notify Supervisor
+  await NotificationDispatcherService.dispatch({
+    type: 'LEAVE_APPLIED',
+    recipients: ['sup1'],
+    title: 'New Leave Request',
+    message: `${req.user!.name} applied for ${leaveType} Leave from ${startDate} to ${endDate}.`,
+    link: '/supervisor/approvals'
   });
 
   res.json({ success: true, leave: newLeave });
@@ -1198,13 +1224,18 @@ apiRouter.post('/leaves/:id/cancel', requireAuth, (req: Request, res: Response) 
 });
 
 // Approve/Reject Leave (by Supervisor)
-apiRouter.post('/leaves/:id/approve', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/leaves/:id/approve', requireAuth, async (req: Request, res: Response) => {
   const leaveId = req.params.id;
   const { approve, comment } = req.body;
 
   if (req.user!.roleId !== '2' && req.user!.roleId !== '3') {
     return res.status(403).json({ error: 'Forbidden: Only supervisor can approve leaves' });
   }
+
+  let leaveUserId = '';
+  let leaveStartDate = '';
+  let leaveEndDate = '';
+  let leaveStatus = '';
 
   dbInstance.updateState(state => {
     const leave = state.leaveRequests.find(l => l.id === leaveId);
@@ -1213,6 +1244,11 @@ apiRouter.post('/leaves/:id/approve', requireAuth, (req: Request, res: Response)
     const isApproved = !!approve;
     leave.status = isApproved ? 'approved' : 'rejected';
     leave.supervisorComment = comment;
+
+    leaveUserId = leave.userId;
+    leaveStartDate = leave.startDate;
+    leaveEndDate = leave.endDate;
+    leaveStatus = leave.status;
 
     const start = new Date(leave.startDate);
     const end = new Date(leave.endDate);
@@ -1243,15 +1279,6 @@ apiRouter.post('/leaves/:id/approve', requireAuth, (req: Request, res: Response)
       }
     }
 
-    // Send notification
-    NotificationDispatcherService.dispatch({
-      type: 'LEAVE_DECISION',
-      recipients: [leave.userId],
-      title: isApproved ? 'Leave Approved' : 'Leave Rejected',
-      message: `Your leave request for ${leave.startDate} to ${leave.endDate} has been ${leave.status}. Comment: ${comment || 'None'}`,
-      link: '/leaves'
-    }).catch(e => console.error(e));
-
     state.auditLogs.push({
       id: uuid(),
       userId: req.user!.id,
@@ -1260,6 +1287,18 @@ apiRouter.post('/leaves/:id/approve', requireAuth, (req: Request, res: Response)
       newValue: `leaveId: ${leaveId}, comment: ${comment}`
     });
   });
+
+  if (leaveUserId) {
+    const isApproved = leaveStatus === 'approved';
+    // Send notification
+    await NotificationDispatcherService.dispatch({
+      type: 'LEAVE_DECISION',
+      recipients: [leaveUserId],
+      title: isApproved ? 'Leave Approved' : 'Leave Rejected',
+      message: `Your leave request for ${leaveStartDate} to ${leaveEndDate} has been ${leaveStatus}. Comment: ${comment || 'None'}`,
+      link: '/leaves'
+    });
+  }
 
   res.json({ success: true });
 });
@@ -1435,7 +1474,7 @@ apiRouter.get('/chats/:id/messages', requireAuth, (req: Request, res: Response) 
 });
 
 // Send message to chat
-apiRouter.post('/chats/:id/messages', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/chats/:id/messages', requireAuth, async (req: Request, res: Response) => {
   const convId = req.params.id;
   const { text, attachmentUrl, attachmentName } = req.body;
 
@@ -1464,15 +1503,15 @@ apiRouter.post('/chats/:id/messages', requireAuth, (req: Request, res: Response)
   // Push notification to other participants via asynchronous NotificationService
   const otherParticipants = dbInstance.getConversationParticipants().filter(p => p.conversationId === convId && p.userId !== req.user!.id);
   const convTitle = dbInstance.getConversations().find(c => c.id === convId)?.title || 'Chat';
-  otherParticipants.forEach(async (p) => {
-    NotificationDispatcherService.dispatch({
+  for (const p of otherParticipants) {
+    await NotificationDispatcherService.dispatch({
       type: 'CHAT_MESSAGE',
       recipients: [p.userId],
       title: `New Message in ${convTitle}`,
       message: `${req.user!.name}: ${text ? text.substring(0, 50) : 'Sent an attachment'}`,
       link: '/chats'
-    }).catch(e => console.error(e));
-  });
+    });
+  }
 
 
   res.json(newMsg);
