@@ -22,18 +22,52 @@ export class NotificationDispatcherService {
     console.log(`[NotificationDispatcherService] Dispatching event "${type}" with title "${title}" to ${recipients.length} recipients.`);
 
     for (const userId of recipients) {
-      // 1. Retrieve the recipient User object to inspect preferences
-      const user = dbInstance.getUsers().find(u => u.id === userId);
+      // 1. Retrieve the recipient User object directly from MySQL to prevent stale in-memory state
+      let user: any = null;
+      try {
+        const { query } = await import('../db/mysql');
+        const usersResult = await query<any[]>('SELECT * FROM users WHERE id = ?', [userId]);
+        if (usersResult && usersResult.length > 0) {
+          user = usersResult[0];
+        }
+      } catch (dbErr) {
+        console.error(`[NotificationDispatcherService] Failed to fetch user ${userId} from MySQL:`, dbErr);
+      }
+
       if (!user) {
         console.warn(`[NotificationDispatcherService] Recipient user with ID "${userId}" not found. Skipping.`);
         continue;
       }
 
-      // 2. Read preferences (with default values matching system guidelines)
-      const inAppEnabled = user.inAppNotificationsEnabled !== false; // Default: ON
-      const internalMessagesEnabled = user.internalMessagesEnabled !== false; // Default: ON
-      const telegramEnabled = user.telegramNotificationsEnabled === true; // Default: OFF
-      const telegramChatId = user.telegramChatId;
+      // 2. Read preferences supporting both camelCase and snake_case fields safely
+      const inAppEnabled =
+        user.in_app_notifications_enabled !== 0 &&
+        user.inAppNotificationsEnabled !== false; // Default: ON
+
+      const internalMessagesEnabled =
+        user.internal_messages_enabled !== 0 &&
+        user.internalMessagesEnabled !== false; // Default: ON
+
+      const telegramEnabled =
+        user.telegram_notifications_enabled === 1 ||
+        user.telegramNotificationsEnabled === true; // Default: OFF
+
+      const telegramChatId =
+        user.telegram_chat_id ||
+        user.telegramChatId;
+
+      const recipientName =
+        user.name ||
+        user.username ||
+        'Unknown';
+
+      // 3. Detailed Diagnostic Logging
+      console.log('--- [NotificationDispatcher] Diagnostic Log ---');
+      console.log('[NotificationDispatcher] Event Type:', type);
+      console.log('[NotificationDispatcher] Recipient ID:', userId);
+      console.log('[NotificationDispatcher] Recipient Name:', recipientName);
+      console.log('[NotificationDispatcher] Telegram Enabled:', telegramEnabled);
+      console.log('[NotificationDispatcher] Chat ID:', telegramChatId);
 
       // --- CHANNEL 1: IN-APP NOTIFICATION ---
       if (inAppEnabled) {
@@ -45,12 +79,15 @@ export class NotificationDispatcherService {
 
           await getNotificationService().sendNotification(userId, title, message, typeMapping, link);
           await this.logDelivery(userId, 'in-app', type, 'sent');
+          console.log('[NotificationDispatcher] Channel "in-app" execution result: sent');
         } catch (error: any) {
           console.error(`[NotificationDispatcherService] Failed to send In-App notification to ${userId}:`, error);
           await this.logDelivery(userId, 'in-app', type, 'failed', error.message || String(error));
+          console.log(`[NotificationDispatcher] Channel "in-app" execution result: failed (${error.message || String(error)})`);
         }
       } else {
         await this.logDelivery(userId, 'in-app', type, 'skipped', 'Disabled in user preferences');
+        console.log('[NotificationDispatcher] Channel "in-app" execution result: skipped (disabled)');
       }
 
       // --- CHANNEL 2: INTERNAL MESSAGES ---
@@ -94,12 +131,15 @@ export class NotificationDispatcherService {
           SocketService.broadcastMessage(sysConvId, newMsg);
 
           await this.logDelivery(userId, 'internal-message', type, 'sent');
+          console.log('[NotificationDispatcher] Channel "internal-message" execution result: sent');
         } catch (error: any) {
           console.error(`[NotificationDispatcherService] Failed to send Internal Message to ${userId}:`, error);
           await this.logDelivery(userId, 'internal-message', type, 'failed', error.message || String(error));
+          console.log(`[NotificationDispatcher] Channel "internal-message" execution result: failed (${error.message || String(error)})`);
         }
       } else {
         await this.logDelivery(userId, 'internal-message', type, 'skipped', 'Disabled in user preferences');
+        console.log('[NotificationDispatcher] Channel "internal-message" execution result: skipped (disabled)');
       }
 
       // --- CHANNEL 3: TELEGRAM BOT NOTIFICATIONS ---
@@ -112,20 +152,26 @@ export class NotificationDispatcherService {
             
             if (success) {
               await this.logDelivery(userId, 'telegram', type, 'sent');
+              console.log('[NotificationDispatcher] Channel "telegram" execution result: sent');
             } else {
               await this.logDelivery(userId, 'telegram', type, 'failed', 'Telegram bot API returned unsuccessful status');
+              console.log('[NotificationDispatcher] Channel "telegram" execution result: failed (API returned unsuccessful status)');
             }
           } catch (error: any) {
             console.error(`[NotificationDispatcherService] Failed to deliver Telegram notification to ${userId}:`, error);
             await this.logDelivery(userId, 'telegram', type, 'failed', error.message || String(error));
+            console.log(`[NotificationDispatcher] Channel "telegram" execution result: failed (${error.message || String(error)})`);
           }
         } else {
           await this.logDelivery(userId, 'telegram', type, 'skipped', 'Enabled but missing telegram_chat_id');
+          console.log('[NotificationDispatcher] Channel "telegram" execution result: skipped (missing chat ID)');
         }
       } else {
         await this.logDelivery(userId, 'telegram', type, 'skipped', 'Disabled in user preferences');
+        console.log('[NotificationDispatcher] Channel "telegram" execution result: skipped (disabled)');
       }
 
+      console.log('------------------------------------------------');
       // --- CHANNELS 4+: FUTURE CHANNELS EXTENSILITY GATEWAY (e.g., WhatsApp, Email) ---
       // These can be integrated by adding similar blocks here without altering any upstream code.
     }
@@ -155,3 +201,6 @@ export class NotificationDispatcherService {
     }
   }
 }
+
+console.log('[NotificationDispatcherService] Initialized successfully.');
+
