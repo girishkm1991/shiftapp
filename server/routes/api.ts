@@ -551,130 +551,153 @@ apiRouter.get('/swaps', requireAuth, (req: Request, res: Response) => {
 
 // Create a Swap Request
 apiRouter.post('/swaps', requireAuth, async (req: Request, res: Response) => {
-  const { date, shiftCode, swapType, targetUserId, targetEmployeeId, remarks, incentiveOffered, incentiveAmount, requestedShiftCode } = req.body;
-  
-  const normalizedSwapType = (swapType || '').toString().toLowerCase();
-  const finalTargetUserId = targetUserId || targetEmployeeId;
+  console.log('[Swap Creation] Request received');
+  try {
+    const { date, shiftCode, swapType, targetUserId, targetEmployeeId, remarks, incentiveOffered, incentiveAmount, requestedShiftCode } = req.body;
+    
+    const normalizedSwapType = (swapType || '').toString().toLowerCase();
+    const finalTargetUserId = targetUserId || targetEmployeeId;
 
-  if (!date || !shiftCode || !swapType || !requestedShiftCode) {
-    return res.status(400).json({ error: 'date, shiftCode, swapType and requestedShiftCode are required' });
-  }
+    if (!date || !shiftCode || !swapType || !requestedShiftCode) {
+      return res.status(400).json({ error: 'date, shiftCode, swapType and requestedShiftCode are required' });
+    }
 
-  if (requestedShiftCode === shiftCode) {
-    return res.status(400).json({ error: 'You cannot request the same shift you currently have.' });
-  }
+    if (requestedShiftCode === shiftCode) {
+      return res.status(400).json({ error: 'You cannot request the same shift you currently have.' });
+    }
 
-  const requesterId = req.user!.id;
-  
-  // Verify requester actually has this assignment using the centralized resolution service
-  const {
-    shiftCode: currentAssignCode,
-    source
-  } = ScheduleResolutionService.resolveEmployeeShift(
-    requesterId,
-    date
-  );
+    console.log('[Swap Creation] Validation completed');
 
-  ScheduleResolutionService.logResolution(
-    'Swap Creation',
-    requesterId,
-    date,
-    currentAssignCode,
-    source
-  );
+    const requesterId = req.user!.id;
+    
+    // Verify requester actually has this assignment using the centralized resolution service
+    const {
+      shiftCode: currentAssignCode,
+      source
+    } = ScheduleResolutionService.resolveEmployeeShift(
+      requesterId,
+      date
+    );
 
-  if (!currentAssignCode || currentAssignCode === 'OFF') {
-    return res.status(400).json({
-      error: `You are OFF on ${date}.`
-    });
-  }
+    ScheduleResolutionService.logResolution(
+      'Swap Creation',
+      requesterId,
+      date,
+      currentAssignCode,
+      source
+    );
 
-  if (currentAssignCode !== shiftCode) {
-    return res.status(400).json({
-      error: `You are not scheduled for ${shiftCode} Shift on ${date}. Current: ${currentAssignCode}`
-    });
-  }
-
-  const newSwapId = 'swap_' + uuid();
-  const newSwap: SwapRequest = {
-    id: newSwapId,
-    requesterId,
-    date,
-    shiftCode,
-    requestedShiftCode,
-    swapType: normalizedSwapType,
-    targetUserId: normalizedSwapType === 'direct' ? finalTargetUserId : undefined,
-    status: 'pending',
-    incentiveOffered: !!incentiveOffered || (incentiveAmount && Number(incentiveAmount) > 0),
-    incentiveAmount: incentiveAmount ? Number(incentiveAmount) : 0,
-    remarks,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  const convId = 'c_swap_' + uuid();
-  dbInstance.updateState(state => {
-    state.swapRequests.push(newSwap);
-
-    // Auto-create swap chat discussion thread
-    state.conversations.push({
-      id: convId,
-      type: 'swap',
-      title: `Swap Discussion: ${req.user!.name} (${date})`,
-      swapRequestId: newSwapId,
-      createdAt: new Date().toISOString()
-    });
-
-    state.conversationParticipants.push({
-      id: uuid(),
-      conversationId: convId,
-      userId: requesterId
-    });
-
-    if (swapType === 'direct' && finalTargetUserId) {
-      // Direct notification participant addition
-      state.conversationParticipants.push({
-        id: uuid(),
-        conversationId: convId,
-        userId: finalTargetUserId
+    if (!currentAssignCode || currentAssignCode === 'OFF') {
+      return res.status(400).json({
+        error: `You are OFF on ${date}.`
       });
     }
 
-    state.auditLogs.push({
-      id: uuid(),
-      userId: requesterId,
-      action: 'CREATE_SWAP_REQUEST',
-      timestamp: new Date().toISOString(),
-      newValue: JSON.stringify(newSwap)
-    });
-  });
-
-  // Notify eligible employees if open shift - done asynchronously but fully awaited outside the state update
-  if (swapType === 'open') {
-    const eligibleUsers = dbInstance.getUsers().filter(u => u.id !== requesterId && u.roleId === '1');
-    for (const u of eligibleUsers) {
-      const check = checkEligibility(u.id, date, shiftCode);
-      if (check.eligible) {
-        await NotificationDispatcherService.dispatch({
-          type: 'OPEN_MARKETPLACE_CREATED',
-          recipients: [u.id],
-          title: 'New Swap Opportunity',
-          message: `New Shift Swap Opportunity\n\nEmployee: ${req.user!.name} (${req.user!.clockId || 'N/A'})\nDate: ${date}\nShift: ${shiftCode}\n\nOpen Imvelo Shift to volunteer.`,
-          link: '/swap-marketplace'
-        });
-      }
+    if (currentAssignCode !== shiftCode) {
+      return res.status(400).json({
+        error: `You are not scheduled for ${shiftCode} Shift on ${date}. Current: ${currentAssignCode}`
+      });
     }
-  } else if (swapType === 'direct' && finalTargetUserId) {
-    await NotificationDispatcherService.dispatch({
-      type: 'DIRECT_SWAP_CREATED',
-      recipients: [finalTargetUserId],
-      title: 'Direct Swap Request',
-      message: `Direct Shift Swap Request\n\n${req.user!.name} has requested a direct swap with you.\n\nDate: ${date}\nRequested Shift: ${shiftCode}`,
-      link: '/swap-marketplace'
-    });
-  }
 
-  res.json({ success: true, swap: newSwap });
+    console.log('[Swap Creation] Creating swap request');
+    const newSwapId = 'swap_' + uuid();
+    const newSwap: SwapRequest = {
+      id: newSwapId,
+      requesterId,
+      date,
+      shiftCode,
+      requestedShiftCode,
+      swapType: normalizedSwapType,
+      targetUserId: normalizedSwapType === 'direct' ? finalTargetUserId : undefined,
+      status: 'pending',
+      incentiveOffered: !!incentiveOffered || (incentiveAmount && Number(incentiveAmount) > 0),
+      incentiveAmount: incentiveAmount ? Number(incentiveAmount) : 0,
+      remarks,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const convId = 'c_swap_' + uuid();
+
+    try {
+      dbInstance.updateState(state => {
+        state.swapRequests.push(newSwap);
+
+        // Auto-create swap chat discussion thread
+        state.conversations.push({
+          id: convId,
+          type: 'swap',
+          title: `Swap Discussion: ${req.user!.name} (${date})`,
+          swapRequestId: newSwapId,
+          createdAt: new Date().toISOString()
+        });
+
+        state.conversationParticipants.push({
+          id: uuid(),
+          conversationId: convId,
+          userId: requesterId
+        });
+
+        if ((swapType === 'direct' || normalizedSwapType === 'direct') && finalTargetUserId) {
+          // Direct notification participant addition
+          state.conversationParticipants.push({
+            id: uuid(),
+            conversationId: convId,
+            userId: finalTargetUserId
+          });
+        }
+
+        state.auditLogs.push({
+          id: uuid(),
+          userId: requesterId,
+          action: 'CREATE_SWAP_REQUEST',
+          timestamp: new Date().toISOString(),
+          newValue: JSON.stringify(newSwap)
+        });
+      });
+      console.log('[Swap Creation] Swap persisted successfully');
+    } catch (stateErr) {
+      console.error('[Swap Creation] Error inside dbInstance.updateState:', stateErr);
+      throw stateErr;
+    }
+
+    console.log('[Swap Creation] About to dispatch notifications');
+
+    // Notify eligible employees if open shift - done asynchronously but fully awaited outside the state update
+    if (swapType === 'open' || normalizedSwapType === 'open') {
+      const eligibleUsers = dbInstance.getUsers().filter(u => u.id !== requesterId && u.roleId === '1');
+      for (const u of eligibleUsers) {
+        const check = checkEligibility(u.id, date, shiftCode);
+        if (check.eligible) {
+          console.log(`[Swap Creation] Triggering dispatch of OPEN_MARKETPLACE_CREATED for recipient user ${u.id}`);
+          await NotificationDispatcherService.dispatch({
+            type: 'OPEN_MARKETPLACE_CREATED',
+            recipients: [u.id],
+            title: 'New Swap Opportunity',
+            message: `New Shift Swap Opportunity\n\nEmployee: ${req.user!.name} (${req.user!.clockId || 'N/A'})\nDate: ${date}\nShift: ${shiftCode}\n\nOpen Imvelo Shift to volunteer.`,
+            link: '/swap-marketplace'
+          });
+        }
+      }
+    } else if ((swapType === 'direct' || normalizedSwapType === 'direct') && finalTargetUserId) {
+      console.log(`[Swap Creation] Triggering dispatch of DIRECT_SWAP_CREATED for recipient user ${finalTargetUserId}`);
+      await NotificationDispatcherService.dispatch({
+        type: 'DIRECT_SWAP_CREATED',
+        recipients: [finalTargetUserId],
+        title: 'Direct Swap Request',
+        message: `Direct Shift Swap Request\n\n${req.user!.name} has requested a direct swap with you.\n\nDate: ${date}\nRequested Shift: ${shiftCode}`,
+        link: '/swap-marketplace'
+      });
+    }
+
+    console.log('[Swap Creation] Notification dispatch completed');
+
+    res.json({ success: true, swap: newSwap });
+    console.log('[Swap Creation] Response sent');
+  } catch (err) {
+    console.error('[Swap Creation] Fatal Error:', err);
+    throw err;
+  }
 });
 
 // Volunteer for an open shift
